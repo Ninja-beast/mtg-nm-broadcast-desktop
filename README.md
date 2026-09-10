@@ -1,5 +1,6 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 # MTG NM Broadcast Desktop - Fase 1
 
 Dette er fundamentet fra arkitektur-planen: en Windows-app (Electron +
@@ -134,6 +135,8 @@ WS   ws://localhost:4848/ws          -> { type: "state", data: {...} } pa hver e
 =======
 =======
 >>>>>>> origin/main
+=======
+>>>>>>> origin/main
 # MTG NM Broadcast Desktop
 
 Windows-app: turnering-motor + lokal API/WebSocket-server for OBS-overlays og mobil/klient-kontroll av MTG NM-turneringer.
@@ -146,6 +149,9 @@ Windows-app: turnering-motor + lokal API/WebSocket-server for OBS-overlays og mo
 - Tema-fane for tilpasning av overlay-utseende
 - Automatiske oppdateringer via GitHub Releases
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> origin/main
+=======
 >>>>>>> origin/main
 =======
 >>>>>>> origin/main

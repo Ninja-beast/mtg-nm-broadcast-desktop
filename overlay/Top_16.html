@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MTG Top 16 Overlay</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      color: #fff;
+      font-family: 'Sora', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .overlay {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      background: #000;
+      overflow: hidden;
+      text-transform: uppercase;
+    }
+
+    .panel {
+      position: absolute;
+      left: 32px;
+      top: 24px;
+      width: 1120px;
+      height: 960px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .header {
+      height: 65px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px 0 14px;
+      background: #000;
+    }
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo {
+      height: 44px;
+      width: auto;
+      display: block;
+    }
+
+    .title,
+    .round {
+      font-size: 40px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+
+    .rows {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .rows {
+      --scale: 0.9;
+      --row-height: 51px;
+    }
+
+    .row {
+      height: var(--row-height);
+      display: grid;
+      grid-template-columns: calc(54px * var(--scale)) calc(70px * var(--scale)) 1fr calc(198px * var(--scale));
+      align-items: center;
+      background: linear-gradient(90deg, #9f0c22 0%, #c71535 72%, #c71434 100%);
+      border-radius: 10px !important;
+      overflow: hidden !important;
+    }
+
+    .rank {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: calc(40px * var(--scale));
+      font-weight: 800;
+      background: #000;
+      border-radius: 10px 0 0 10px !important;
+    }
+
+    .flag {
+      width: calc(58px * var(--scale));
+      height: calc(40px * var(--scale));
+      object-fit: cover;
+      border-radius: 2px;
+      justify-self: center;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
+    }
+
+    .name {
+      padding-left: calc(12px * var(--scale));
+      font-size: calc(40px * var(--scale));
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .record {
+      text-align: center;
+      font-size: calc(40px * var(--scale));
+      font-weight: 800;
+      letter-spacing: 1px;
+      white-space: nowrap;
+    }
+
+    .empty {
+      opacity: 0.8;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .bottom-bar-image {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 1920px;
+      height: auto;
+      display: block;
+      z-index: 30;
+    }
+
+    .bottom-bar-ticker {
+      position: absolute;
+      left: 0;
+      bottom: -3px;
+      width: 1750px;
+      height: 70px;
+      overflow: hidden;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      padding-left: 40px;
+      box-sizing: border-box;
+      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 85%, transparent 100%);
+      mask-image: linear-gradient(to right, #000 0%, #000 85%, transparent 100%);
+    }
+
+    .bottom-bar-ticker-track {
+      position: relative;
+      top: 12px;
+      display: flex;
+      white-space: nowrap;
+      font-family: 'Sora', sans-serif;
+      font-weight: 800;
+      font-size: 26px;
+      letter-spacing: 1px;
+      color: #fff;
+      animation: bottomBarTickerScroll 200s linear infinite;
+    }
+
+    .bottom-bar-ticker-track span {
+      padding: 0 40px;
+    }
+
+    @keyframes bottomBarTickerScroll {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+
+  </style>
+</head>
+<body>
+  <div class="overlay">
+    <img class="bg" src="Plain1080p_background.png" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:-1; pointer-events:none;">
+    <div class="panel">
+      <div class="header">
+        <div class="title-group">
+          <img class="logo" src="NMMTG_Ikon_hvit_26_sm.png" alt="logo">
+          <div id="title" class="title">NORGESMESTERSKAPET</div>
+        </div>
+        <div id="round" class="round">RUNDE 13</div>
+      </div>
+      <div id="rows" class="rows"></div>
+    </div>
+<img class="bottom-bar-image" src="bottomBarScroller.png" alt="">
+<div class="bottom-bar-ticker">
+    <div id="bottomBarTickerTrack" class="bottom-bar-ticker-track"></div>
+  </div>
+  </div>
+
+  <script>
+    const DEFAULT_DATA_URL = "/api/overlay?t=";
+    const DEFAULT_FALLBACK_DATA_URL = "https://script.google.com/macros/s/AKfycbz3aep17Ul9e_PVGFBr-bOE71WBlXND_QKne07_bSwGduC3rOm7ITSjD1T3-O3olduG/exec";
+    const FLAG_BASE_PATH = "images/flags/";
+    const query = new URLSearchParams(window.location.search);
+    const DATA_URL = String(query.get("dataUrl") || DEFAULT_DATA_URL).trim();
+    const FALLBACK_DATA_URL = String(query.get("fallbackDataUrl") || DEFAULT_FALLBACK_DATA_URL).trim();
+    const POLL_MS = Math.max(parseInt(query.get("pollMs"), 10) || 2500, 250);
+
+    let inFlight = false;
+    let hasRendered = false;
+    let lastRenderSignature = "";
+
+    function normalizeFlagCode(value) {
+      if (value == null) return "";
+
+      const aliases = {
+        norge: "no",
+        norway: "no",
+        sverige: "se",
+        sweden: "se",
+        danmark: "dk",
+        denmark: "dk",
+        finland: "fi",
+        england: "gb-eng",
+        scotland: "gb-sct",
+        wales: "gb-wls",
+        northernireland: "gb-nir",
+        uk: "gb",
+        unitedkingdom: "gb",
+        usa: "us",
+        unitedstates: "us"
+      };
+
+      const cleaned = String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/_/g, "-")
+        .replace(/\s+/g, "")
+        .replace(/[^a-z0-9-]/g, "");
+
+      return aliases[cleaned] || cleaned;
+    }
+
+    function readText(value, fallback) {
+      const text = String(value ?? "").trim();
+      return text || fallback;
+    }
+
+    function firstFilled() {
+      for (let i = 0; i < arguments.length; i += 1) {
+        const value = arguments[i];
+        if (value == null) continue;
+        if (typeof value === "object") continue;
+        const text = String(value).trim();
+        if (text) return text;
+      }
+      return "";
+    }
+
+    function appendTimestamp(url, timestamp) {
+      const clean = String(url || "").trim();
+      if (!clean) return "";
+      if (/[?&]t=$/.test(clean)) return clean + timestamp;
+      if (clean.includes("?")) return clean + "&t=" + timestamp;
+      return clean + "?t=" + timestamp;
+    }
+
+    function looksLikeTop16Payload(data) {
+      if (!data || typeof data !== "object") return false;
+      if (Array.isArray(data?.top16?.rows) && data.top16.rows.length > 0) return true;
+      if (Array.isArray(data?.rows) && data.rows.length > 0) return true;
+      if (Array.isArray(data?.standings) && data.standings.length > 0) return true;
+
+      const source = data?.top16 && typeof data.top16 === "object" ? data.top16 : data;
+      for (let i = 1; i <= 16; i += 1) {
+        const candidate = firstFilled(source?.[`name${i}`], source?.[`spiller${i}`]);
+        if (candidate) return true;
+      }
+
+      return false;
+    }
+
+    function isPlaceholderName(value) {
+      const name = String(value || "").trim().toLowerCase();
+      if (!name) return true;
+      if (name === "player") return true;
+      if (/^player\s*\d+$/.test(name)) return true;
+      return false;
+    }
+
+    function readSource(data) {
+      if (data?.top16 && typeof data.top16 === "object") return data.top16;
+      if (data?.sceneData?.top16 && typeof data.sceneData.top16 === "object") return data.sceneData.top16;
+      if (Array.isArray(data?.standings)) return { rows: data.standings };
+      if (Array.isArray(data?.rows)) return { rows: data.rows };
+      if (Array.isArray(data)) return { rows: data };
+      return data || {};
+    }
+
+    function readIndexedRows(source) {
+      const rows = [];
+
+      for (let i = 1; i <= 16; i += 1) {
+        const rank = firstFilled(source?.[`rank${i}`], source?.[`plass${i}`], source?.[`position${i}`], i);
+        const name = firstFilled(source?.[`name${i}`], source?.[`player${i}`], source?.[`spiller${i}`]);
+        const record = firstFilled(
+          source?.[`record${i}`],
+          source?.[`wl${i}`],
+          source?.[`score${i}`],
+          source?.[`standing${i}`],
+          source?.[`wins${i}`] || source?.[`win${i}`] || source?.[`seire${i}`]
+            ? `${firstFilled(source?.[`wins${i}`], source?.[`win${i}`], source?.[`seire${i}`], "0")}-${firstFilled(source?.[`losses${i}`], source?.[`loss${i}`], source?.[`tap${i}`], "0")}-${firstFilled(source?.[`draws${i}`], source?.[`draw${i}`], source?.[`uavgjort${i}`], "0")}`
+            : ""
+        );
+        const flag = normalizeFlagCode(firstFilled(
+          source?.[`flag${i}`],
+          source?.[`flagCode${i}`],
+          source?.[`countryCode${i}`],
+          source?.[`country${i}`],
+          source?.[`nation${i}`],
+          source?.[`uid${i}`]
+        ));
+
+        if (!name && !record && !flag) continue;
+
+        rows.push({
+          rank,
+          name: name || "PLAYER",
+          record: record || "0-0-0",
+          flag
+        });
+      }
+
+      return rows;
+    }
+
+    function readRows(source) {
+      const list = Array.isArray(source)
+        ? source
+        : Array.isArray(source.rows)
+        ? source.rows
+        : Array.isArray(source.players)
+          ? source.players
+          : Array.isArray(source.items)
+            ? source.items
+            : Array.isArray(source.list)
+              ? source.list
+              : Array.isArray(source.standings)
+                ? source.standings
+                : Array.isArray(source.top16Rows)
+                  ? source.top16Rows
+                  : [];
+
+      const indexedRows = !list.length ? readIndexedRows(source) : [];
+      const chosenRows = list.length ? list : indexedRows;
+
+      return chosenRows.slice(0, 16).map((row, index) => ({
+        rank: row?.rank ?? index + 1,
+        name: readText(row?.name, ""),
+        record: readText(
+          row?.record
+          ?? row?.wl
+          ?? row?.score
+          ?? row?.standing
+          ?? buildRecord(row),
+          "0-0-0"
+        ),
+        flag: normalizeFlagCode(firstFilled(
+          row?.flag,
+          row?.flagCode,
+          row?.countryCode,
+          row?.country,
+          row?.nation,
+          row?.uid,
+          row?.player?.flag,
+          row?.player?.flagCode,
+          row?.player?.countryCode,
+          row?.player?.country,
+          row?.player?.nation,
+          row?.player?.uid
+        ))
+      })).filter((row) => !isPlaceholderName(row.name));
+    }
+
+    function buildRecord(row) {
+      const wins = String(row?.wins ?? row?.win ?? row?.seire ?? "").trim();
+      const losses = String(row?.losses ?? row?.loss ?? row?.tap ?? "").trim();
+      const draws = String(row?.draws ?? row?.draw ?? row?.uavgjort ?? "").trim();
+
+      if (!wins && !losses && !draws) return "";
+
+      return `${wins || "0"}-${losses || "0"}-${draws || "0"}`;
+    }
+
+    function buildRenderSignature(data) {
+      const source = readSource(data);
+      const rows = readRows(source);
+      return JSON.stringify({
+        title: readText(source.title ?? data?.sceneTitle, "NORGESMESTERSKAPET"),
+        round: readText(source.round ?? source.roundLabel ?? data?.sceneSubtitle, "RUNDE 13"),
+        rows
+      });
+    }
+
+    // Panelet er 1032px høyt, header + mellomrom tar 77px, resten er
+    // tilgjengelig for radene. Radhøyde/skrift/flagg-størrelse skaleres
+    // proporsjonalt ut fra hvor mange spillere som faktisk har data,
+    // slik at listen alltid fyller flaten uten tomrom, uansett antall.
+    const PANEL_HEIGHT = 1032;
+    const HEADER_HEIGHT = 72;
+    const HEADER_GAP = 5;
+    const ROW_GAP = 4;
+    const BASE_ROW_HEIGHT = 57;
+    const MIN_ROW_HEIGHT = 40;
+    const MAX_VISUAL_SCALE = 1.3;
+
+    function applyRowSizing(rowsEl, count) {
+      const n = Math.max(count, 1);
+      const available = PANEL_HEIGHT - HEADER_HEIGHT - HEADER_GAP;
+      const rowHeight = Math.max((available - (n - 1) * ROW_GAP) / n, MIN_ROW_HEIGHT);
+      const visualScale = Math.min(rowHeight / BASE_ROW_HEIGHT, MAX_VISUAL_SCALE);
+      rowsEl.style.setProperty("--row-height", rowHeight + "px");
+      rowsEl.style.setProperty("--scale", visualScale);
+    }
+
+    // Krymper skriftstørrelsen for ALLE navn SAMTIDIG til samme
+    // størrelse - i motsetning til å krympe hvert navn uavhengig av
+    // de andre (som ga ulik tekststørrelse fra rad til rad), finner
+    // denne den ENE størrelsen som er stor nok til at det korteste
+    // navnet ser bra ut, men liten nok til at selv det lengste navnet
+    // (f.eks. "STEINAR ANDREAS BREISTEIN ERIKSEN") får plass uten
+    // "...". Kjøres etter at elementene faktisk er lagt til i DOM-en,
+    // siden vi trenger ekte, gjengitt bredde (clientWidth/scrollWidth)
+    // for å vite om noen av dem overflyter.
+    function fitNamesUniformly(nameEls) {
+      if (!nameEls.length) return;
+
+      nameEls.forEach((el) => { el.style.fontSize = ""; });
+
+      const baseFontSize = parseFloat(window.getComputedStyle(nameEls[0]).fontSize);
+      if (!baseFontSize) return;
+
+      let fontSize = baseFontSize;
+      let guard = 0;
+
+      function anyOverflowing() {
+        return nameEls.some((el) => el.scrollWidth > el.clientWidth);
+      }
+
+      while (anyOverflowing() && fontSize > 12 && guard < 40) {
+        fontSize -= 1;
+        nameEls.forEach((el) => { el.style.fontSize = fontSize + "px"; });
+        guard += 1;
+      }
+    }
+
+    function render(data) {
+      const signature = buildRenderSignature(data);
+      if (signature === lastRenderSignature) {
+        return;
+      }
+      lastRenderSignature = signature;
+
+      const source = readSource(data);
+      hasRendered = true;
+      const titleEl = document.getElementById("title");
+      const roundEl = document.getElementById("round");
+      const rowsEl = document.getElementById("rows");
+
+      if (titleEl) titleEl.innerText = readText(source.title ?? data?.sceneTitle, "NORGESMESTERSKAPET");
+      if (roundEl) roundEl.innerText = readText(source.round ?? source.roundLabel ?? data?.sceneSubtitle, "RUNDE 13");
+      if (!rowsEl) return;
+
+      const rows = readRows(source);
+      rowsEl.innerHTML = "";
+
+      if (!rows.length) {
+        applyRowSizing(rowsEl, 1);
+        const fallback = document.createElement("div");
+        fallback.className = "row empty";
+        fallback.innerHTML = '<div class="rank">-</div><div></div><div class="name">INGEN TOP 16 DATA</div><div class="record">-</div>';
+        rowsEl.appendChild(fallback);
+        return;
+      }
+
+      applyRowSizing(rowsEl, rows.length);
+
+      rows.forEach((row) => {
+        const rowEl = document.createElement("div");
+        rowEl.className = "row";
+
+        const rankEl = document.createElement("div");
+        rankEl.className = "rank";
+        rankEl.innerText = row.rank;
+
+        const flagEl = document.createElement("img");
+        flagEl.className = "flag";
+        flagEl.alt = "flag";
+
+        if (row.flag) {
+          flagEl.src = FLAG_BASE_PATH + row.flag + ".png";
+        } else {
+          flagEl.style.visibility = "hidden";
+        }
+
+        flagEl.onerror = () => {
+          flagEl.style.visibility = "hidden";
+        };
+
+        const nameEl = document.createElement("div");
+        nameEl.className = "name";
+        nameEl.innerText = row.name;
+
+        const recordEl = document.createElement("div");
+        recordEl.className = "record";
+        recordEl.innerText = row.record;
+
+        rowEl.appendChild(rankEl);
+        rowEl.appendChild(flagEl);
+        rowEl.appendChild(nameEl);
+        rowEl.appendChild(recordEl);
+        rowsEl.appendChild(rowEl);
+      });
+
+      // Ma kjores ETTER at radene er lagt til i DOM-en (i en egen
+      // lokke, ikke inni forEach over) - clientWidth/scrollWidth er
+      // kun korrekte nar elementet faktisk er en del av det gjengitte
+      // dokumentet.
+      fitNamesUniformly(Array.from(rowsEl.querySelectorAll(".name")));
+    }
+
+    // Google Apps Script blokkerer CORS-forespørsler fra en "null"
+    // opphavsadresse, som er nettopp det file://-sider sender. JSONP
+    // omgar dette ved a laste svaret som en <script>-tag i stedet for
+    // en fetch/XHR-forespørsel - fungerer fortsatt nar filen apnes
+    // direkte i stedet for gjennom en server.
+    function fetchJSONP(url) {
+      return new Promise((resolve, reject) => {
+        const callbackName = "top16Cb_" + Date.now() + "_" + Math.floor(Math.random() * 100000);
+        const script = document.createElement("script");
+        let settled = false;
+
+        function cleanup() {
+          delete window[callbackName];
+          if (script.parentNode) script.parentNode.removeChild(script);
+        }
+
+        window[callbackName] = (data) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(data);
+        };
+
+        script.onerror = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("JSONP request failed: " + url));
+        };
+
+        const separator = url.includes("?") ? "&" : "?";
+        script.src = url + separator + "callback=" + callbackName;
+        document.head.appendChild(script);
+
+        setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("JSONP request timed out: " + url));
+        }, 60000);
+      });
+    }
+
+    async function fetchTop16Data(url) {
+      if (window.location.protocol === "file:") {
+        return fetchJSONP(url);
+      }
+
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Top16 fetch failed: " + response.status);
+      }
+      return response.json();
+    }
+
+    // Kobler direkte til den lokale desktop-appen sin WebSocket i
+    // stedet for a polle Apps Script - render(data) er UENDRET,
+    // mottar samme datastruktur (data.top16.rows) som for.
+    function connectLocalWebSocket() {
+      const socket = new WebSocket("ws://localhost:4848/ws");
+
+      socket.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "state") render(msg.data);
+        } catch (err) {
+          console.error("[TOP16] Klarte ikke tolke melding fra server", err);
+        }
+      };
+
+      socket.onclose = () => {
+        setTimeout(connectLocalWebSocket, 2000);
+      };
+
+      socket.onerror = () => socket.close();
+    }
+
+    render({});
+    connectLocalWebSocket();
+  </script>
+
+  <script>
+    // Skalerer det faste 1920x1080-designet ned/opp til a fylle det
+    // faktiske vinduet/OBS Browser Source-storrelsen, med riktig
+    // bilde-proporsjon bevart og sentrert.
+    (function () {
+      const overlay = document.querySelector(".overlay");
+      if (!overlay) return;
+
+      function scaleOverlay() {
+        const scaleX = window.innerWidth / 1920;
+        const scaleY = window.innerHeight / 1080;
+        const scale = Math.min(scaleX, scaleY);
+        overlay.style.transform = "scale(" + scale + ")";
+      }
+
+      window.addEventListener("resize", scaleOverlay);
+      scaleOverlay();
+    })();
+  </script>
+<script>
+    // Rullende tekst nederst - hentet fra desktop-appen sin lokale
+    // /api/settings/stream-content (satt via Stream-fanen i appen),
+    // i stedet for den gamle Apps Script-baserte JSONP-hentingen.
+    (function () {
+      const POLL_MS = 5000;
+      let lastTickerText = null;
+
+      function updateTicker(text) {
+        const track = document.getElementById("bottomBarTickerTrack");
+        if (!track || text === lastTickerText) return;
+        lastTickerText = text;
+
+        const repeated = Array(10).fill(text).map(function (t) {
+          return "<span>" + t + "</span>";
+        }).join("");
+        track.innerHTML = repeated + repeated;
+      }
+
+      async function updateBottomBarTicker() {
+        try {
+          const res = await fetch("http://localhost:4848/api/settings/stream-content", { cache: "no-store" });
+          if (!res.ok) return;
+          const data = await res.json();
+          const tickerText = String(data?.tickerText || "").trim() || "SCROLLING INFO >>>>>";
+          updateTicker(tickerText);
+        } catch (err) {
+          console.error("[BOTTOM-BAR-TICKER]", err);
+        }
+      }
+
+      updateBottomBarTicker();
+      setInterval(updateBottomBarTicker, POLL_MS);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,800 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;800&display=swap');
+
+html, body{
+  height:100%;
+  overflow:hidden;
+}
+
+body{
+  margin:0;
+  padding:0;
+  background:transparent;
+  font-family:'Sora',sans-serif;
+  color:white;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.overlay{
+  position:relative;
+  width:1920px;
+  height:1080px;
+  flex-shrink:0;
+  transform-origin:center center;
+}
+
+.scene{
+  position:absolute;
+  inset:0;
+  display:none;
+}
+
+.scene.is-active{
+  display:block;
+}
+
+.bg{
+  position:absolute;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  left:0;
+  top:0;
+  z-index:0;
+}
+
+.bg-playerinfo{
+  height:99px;
+  top:44px;
+  object-fit:fill;
+  z-index:1;
+}
+
+/* PLAYER BLOCKS */
+.player{
+  position:absolute;
+  text-transform:uppercase;
+  z-index:5;
+}
+
+/* Player 1 - venstre */
+.player1{
+  left:120px;
+  top:100px;
+  text-align:left;
+}
+
+/* Player 2 - hoyre */
+.player2{
+  right:120px;
+  top:100px;
+  text-align:right;
+}
+
+/* TOP-LINE */
+.top-line{
+  display:flex;
+  align-items:center;
+  gap:25px;
+}
+
+.player1 .top-line{
+  justify-content: flex-start;
+}
+
+.player2 .top-line{
+  justify-content: flex-end;
+}
+
+/* Name tekstjustering */
+.player1 .name{
+  text-align: left;
+}
+
+.player2 .name{
+  text-align: right;
+}
+
+/* NAME COLUMN - grid med 2 kolonner (flagg / tekst), slik at navn og
+   deck/record ALLTID deler samme tekst-kolonne, uavhengig av om
+   flagget vises eller hvor bredt det er. ".name-wrap" bruker
+   "display:contents" - da forsvinner selve wrap-boksen, og barna
+   (flagg-bildet og navn-diven) blir direkte grid-elementer i
+   name-column i stedet. Dermed havner flagget i den faste
+   flagg-kolonnen, og navnet i tekst-kolonnen - og ".bottom-line"
+   (deck+record) plasseres eksplisitt i SAMME tekst-kolonne, sa
+   forste bokstav i deck alltid starter rett under forste bokstav i
+   navnet (player1), og siste bokstav i deck alltid slutter rett
+   under siste bokstav i navnet (player2). */
+.name-column{
+  display:grid;
+  align-items:center;
+  column-gap:12px;
+}
+
+.player1 .name-column{
+  grid-template-columns: auto minmax(0, 560px);
+}
+
+.player2 .name-column{
+  grid-template-columns: minmax(0, 560px) auto;
+}
+
+.name-wrap{
+  display:contents;
+}
+
+.player1 .bottom-line{
+  grid-column: 2;
+}
+
+.player2 .bottom-line{
+  grid-column: 1;
+  justify-self: end;
+}
+
+/* BOTTOM-LINE */
+.bottom-line{
+  display:flex;
+  gap:25px;
+  font-weight:300;
+}
+
+.player2 .bottom-line{
+  flex-direction: row-reverse;
+}
+
+/* TEXT STYLING */
+.life{
+  font-size:60px;
+  font-weight:800;
+  display:inline-block;
+  transform-origin:center;
+}
+
+.name{
+  font-size:40px;
+  font-weight:800;
+  max-width:100%;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  visibility:visible;
+}
+
+.player-flag{
+  width:44px;
+  height:30px;
+  object-fit:cover;
+  border-radius:3px;
+  display:none;
+  box-shadow:0 0 0 1px rgba(255,255,255,0.18);
+}
+
+.deck,
+.record{
+  font-size:18px;
+  font-weight:300;
+}
+
+/* LIFE ANIMATION */
+.life.change{
+  animation: lifePulse .4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes lifePulse {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* SCORE BAR */
+.score-bar{
+  width: 30px;
+  height: 60px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 4px;
+}
+
+.score-bar-bo5{
+  height: 60px;
+}
+
+/* SEGMENT STYLING */
+.segment {
+  flex: 1;
+  background-color: rgba(0,80,0,0.3);
+  border-radius: 4px;
+  transition: background-color 0.3s ease, transform 0.3s ease;
+}
+
+.segment.is-hidden {
+  display: none;
+}
+
+/* Fylt gronn */
+.segment.filled {
+  background-color: #00ff00;
+}
+
+/* Vinner-segment */
+.segment.winner {
+  background-color: #00ff00;
+  transform: scaleX(1.15);
+  box-shadow: 0 0 15px #00ff00;
+}
+
+/* Tapende segment */
+.segment.loser {
+  background-color: rgba(255,0,0,0.8);
+  animation: blinkRed 0.8s infinite;
+  transform: scale(1);
+}
+
+/* Blink rod animasjon */
+@keyframes blinkRed {
+  0%,50%,100% { background-color: rgba(255,0,0,0.8); }
+  25%,75%     { background-color: rgba(200,0,0,0.3); }
+}
+
+/* WINNER GLOW */
+.player.glow {
+  animation: glowFade 1.5s ease forwards;
+  box-shadow: 0 0 40px #00ff00;
+}
+
+@keyframes glowFade {
+  0% { box-shadow: 0 0 40px #00ff00; }
+  100% { box-shadow: 0 0 0 #00ff00; }
+}
+
+/* GAME INFO */
+.game-info{
+  position:absolute;
+  top:100px;
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  z-index:5;
+}
+
+.game-info-row{
+  position:relative;
+  display:flex;
+  flex-direction:row;
+  align-items:stretch;
+}
+
+.game-info-left{
+  position:absolute;
+  right:100%;
+  top:0;
+  height:100%;
+  display:flex;
+  flex-direction:row;
+  align-items:stretch;
+}
+
+.round-label{
+  background:rgba(0,70,20,0.92);
+  color:white;
+  font-size:26px;
+  font-weight:800;
+  padding:14px 24px;
+  display:flex;
+  align-items:center;
+  white-space:nowrap;
+  border-radius:6px 0 0 6px;
+}
+
+.round-label:empty{
+  display:none;
+}
+
+.round-label:empty + .game-info-divider{
+  display:none;
+}
+
+.game-info-divider{
+  width:3px;
+  background:rgba(255,255,255,0.15);
+}
+
+.timer-display{
+  background:rgba(15,15,15,0.92);
+  color:white;
+  font-size:26px;
+  font-weight:800;
+  font-variant-numeric:tabular-nums;
+  padding:14px 24px;
+  display:flex;
+  align-items:center;
+  white-space:nowrap;
+  border-radius:6px;
+}
+
+.game-info-left:has(.round-label:not(:empty)) + .timer-display{
+  border-radius:0 6px 6px 0;
+}
+
+#roundCounter{
+  display:none;
+}
+
+.format-label{
+  background:rgba(0,70,20,0.92);
+  color:white;
+  font-size:18px;
+  font-weight:800;
+  padding:8px 20px;
+  border-radius:6px;
+  text-transform:uppercase;
+  white-space:nowrap;
+  letter-spacing:1px;
+  margin-bottom:6px;
+  z-index:5;
+}
+
+/* CARD SHOWCASE */
+.card-showcase-wrap{
+  position:absolute;
+  top:588px;
+  width:256px;
+  height:357px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:5;
+}
+
+.card-showcase-wrap-p1{
+  left:16px;
+}
+
+.card-showcase-wrap-p2{
+  right:16px;
+}
+
+.card-showcase{
+  display:none;
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  border-radius:6px;
+}
+
+/* MATCH-SCENE ONLY OVERRIDES
+   Tilpasset til AlphaMask.png sine rod/bla-felt (y:44-138px, hoyde 94px). */
+.scene-match .player1{
+  left:24px;
+  top:44px;
+  height:94px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+}
+
+.scene-match .player2{
+  right:24px;
+  top:44px;
+  height:94px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+}
+
+.scene-match .top-line{
+  gap:10px;
+}
+
+.scene-match .bottom-line{
+  gap:10px;
+  align-items:center;
+  margin-top:2px;
+}
+
+.scene-match .life{
+  font-size:40px;
+  line-height:1;
+  min-width:44px;
+}
+
+.scene-match .name{
+  font-size:21px;
+}
+
+.scene-match .player1 .name-column{
+  grid-template-columns: auto minmax(0, 480px);
+}
+
+.scene-match .player2 .name-column{
+  grid-template-columns: minmax(0, 480px) auto;
+}
+
+.scene-match .player-flag{
+  width:28px;
+  height:19px;
+}
+
+.scene-match .deck,
+.scene-match .record{
+  line-height:1;
+}
+
+.scene-match .deck{
+  letter-spacing:0.5px;
+  font-size:12px;
+}
+
+.scene-match .record{
+  font-size:12px;
+}
+
+.scene-match .score-bar{
+  width:16px;
+  height:36px;
+  gap:3px;
+}
+
+.scene-match .score-bar .segment{
+  flex:1;
+  height:auto;
+}
+
+.scene-match .player2 .segment{
+  background-color: rgba(0,80,0,0.3);
+}
+
+.scene-match .player2 .segment.filled{
+  background-color:#00ff00;
+}
+
+.scene-match .player2 .segment.winner{
+  background-color:#00ff00;
+  box-shadow:0 0 15px #00ff00;
+}
+
+.scene-match .game-info{
+  top:55px;
+}
+
+.scene-match .round-label{
+  font-size:16px;
+  padding:8px 16px;
+}
+
+.scene-match .timer-display{
+  font-size:16px;
+  padding:8px 16px;
+}
+
+.scene-match .format-label{
+  font-size:13px;
+  padding:5px 14px;
+  margin-bottom:4px;
+}
+
+/* BO5-SCENE ONLY OVERRIDES
+   Speiler scene-match sitt kompakte oppsett for samme utseende. */
+.scene-bo5 .player1{
+  left:24px;
+  top:44px;
+  height:94px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+}
+
+.scene-bo5 .player2{
+  right:24px;
+  top:44px;
+  height:94px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+}
+
+.scene-bo5 .top-line{
+  gap:10px;
+}
+
+.scene-bo5 .bottom-line{
+  gap:10px;
+  align-items:center;
+  margin-top:2px;
+}
+
+.scene-bo5 .life{
+  font-size:40px;
+  line-height:1;
+  min-width:44px;
+}
+
+.scene-bo5 .name{
+  font-size:21px;
+}
+
+.scene-bo5 .player1 .name-column{
+  grid-template-columns: auto minmax(0, 480px);
+}
+
+.scene-bo5 .player2 .name-column{
+  grid-template-columns: minmax(0, 480px) auto;
+}
+
+.scene-bo5 .player-flag{
+  width:28px;
+  height:19px;
+}
+
+.scene-bo5 .deck,
+.scene-bo5 .record{
+  line-height:1;
+}
+
+.scene-bo5 .deck{
+  letter-spacing:0.5px;
+  font-size:12px;
+}
+
+.scene-bo5 .record{
+  font-size:12px;
+}
+
+.scene-bo5 .score-bar{
+  width:16px;
+  height:36px;
+  gap:3px;
+}
+
+.scene-bo5 .score-bar .segment{
+  flex:1;
+  height:auto;
+}
+
+.scene-bo5 .player2 .segment{
+  background-color: rgba(0,80,0,0.3);
+}
+
+.scene-bo5 .player2 .segment.filled{
+  background-color:#00ff00;
+}
+
+.scene-bo5 .player2 .segment.winner{
+  background-color:#00ff00;
+  box-shadow:0 0 15px #00ff00;
+}
+
+.scene-bo5 .game-info{
+  top:55px;
+}
+
+.scene-bo5 .round-label{
+  font-size:16px;
+  padding:8px 16px;
+}
+
+.scene-bo5 .timer-display{
+  font-size:16px;
+  padding:8px 16px;
+}
+
+.scene-bo5 .format-label{
+  font-size:13px;
+  padding:5px 14px;
+  margin-bottom:4px;
+}
+
+.format-label:empty{
+  display:none;
+}
+
+#level{
+  display:none;
+}
+
+/* META SCENE */
+.scene-meta{
+  background:
+    linear-gradient(180deg, rgba(39, 135, 205, 0.96) 0%, rgba(0, 0, 0, 0) 24%),
+    radial-gradient(circle at 50% 0%, rgba(39, 135, 205, 0.3), transparent 45%);
+}
+
+.meta-scene{
+  position:absolute;
+  inset:0;
+  padding:24px;
+  box-sizing:border-box;
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  text-transform:uppercase;
+}
+
+.meta-header{
+  padding:0 150px 12px;
+}
+
+.meta-title{
+  font-size:58px;
+  font-weight:800;
+  line-height:1;
+}
+
+.meta-subtitle,
+.meta-year{
+  font-size:22px;
+  font-weight:300;
+  line-height:1.1;
+  opacity:0.95;
+}
+
+.meta-grid{
+  flex:1;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+
+.meta-table{
+  display:flex;
+  flex-direction:column;
+}
+
+.meta-table-head,
+.meta-row{
+  display:grid;
+  grid-template-columns:1.25fr 0.8fr 0.7fr 1.35fr;
+  align-items:center;
+}
+
+.meta-table-head{
+  padding:14px 24px 16px;
+  background:#050505;
+  color:#fff;
+  font-size:20px;
+  font-weight:800;
+}
+
+.meta-rows{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.meta-row{
+  min-height:64px;
+  padding:0 24px;
+  background:linear-gradient(90deg, rgba(171, 22, 39, 0.96), rgba(229, 27, 48, 0.96));
+  color:#fff;
+  font-weight:800;
+  border-bottom:3px solid rgba(0,0,0,0.85);
+  flex-shrink:0;
+}
+
+.meta-row:last-child{
+  border-bottom:none;
+}
+
+.meta-cell{
+  padding:10px 18px;
+  box-sizing:border-box;
+}
+
+.meta-cell + .meta-cell{
+  border-left:2px solid rgba(255,255,255,0.85);
+}
+
+.meta-archetype,
+.meta-count,
+.meta-share{
+  font-size:26px;
+  line-height:1.05;
+}
+
+.meta-count,
+.meta-share{
+  text-align:center;
+  font-size:34px;
+}
+
+.meta-keycard{
+  position:relative;
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+  overflow:hidden;
+  padding:0 18px;
+}
+
+.meta-keycard-text{
+  width:100%;
+  font-size:22px;
+  font-weight:800;
+  line-height:1.1;
+  text-align:center;
+  white-space:pre-line;
+}
+
+.meta-keycard-image{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+
+/* Kort-crop: to smale striper (navn/mana-cost) stablet uten gap.
+   Alt er satt i EKSAKTE piksler - inkludert selve bildet, ikke bare
+   boksen rundt - slik at det ikke er noen prosent-basert hoyde-
+   beregning som kan feile. Bruker flex-kolonne (robust for bade 1 og
+   2 kort) i stedet for absolutt-posisjonerte first-child/last-child. */
+.meta-keycard-container{
+  display:flex;
+  flex-direction:column;
+  width:100%;
+  gap:0;
+}
+
+.meta-keycard-crop{
+  position:relative;
+  width:100%;
+  height:34px;
+  flex:0 0 34px;
+  overflow:hidden;
+  line-height:0;
+  border-radius:4px;
+  box-shadow:0 2px 5px rgba(0,0,0,0.5);
+}
+
+.meta-keycard-crop + .meta-keycard-crop{
+  margin-top:-4px;
+  z-index:2;
+}
+
+.meta-keycard-crop-img{
+  display:block;
+  width:100%;
+  height:34px;
+  object-fit:cover;
+  object-position:top;
+}
+
+.meta-keycard-crop-error{
+  align-items:center;
+  justify-content:center;
+  font-size:10px;
+  font-weight:800;
+  text-align:center;
+  padding:1px;
+}
+
+/* BUNNBAR (statisk bilde) */
+.bottom-bar-image{
+  position:absolute;
+  left:0;
+  bottom:0;
+  width:1920px;
+  height:auto;
+  display:block;
+  z-index:30;
+}
+
+/* BAKGRUNN (statisk bilde) */
+.static-bg-image{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  z-index:-1;
+}

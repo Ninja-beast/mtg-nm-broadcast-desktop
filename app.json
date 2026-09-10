@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "MTG NM Companion",
+    "slug": "mtg-nm-companion",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0b1220"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0b1220"
+      }
+    }
+  }
+}

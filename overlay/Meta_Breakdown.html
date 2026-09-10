@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MTG Meta Overlay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    html,
+    body {
+      overflow: hidden;
+      background: #000;
+    }
+
+    .bottom-bar-image {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 1920px;
+      height: auto;
+      display: block;
+      z-index: 30;
+    }
+
+    .bottom-bar-ticker {
+      position: absolute;
+      left: 0;
+      bottom: -3px;
+      width: 1750px;
+      height: 70px;
+      overflow: hidden;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      padding-left: 40px;
+      box-sizing: border-box;
+      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 85%, transparent 100%);
+      mask-image: linear-gradient(to right, #000 0%, #000 85%, transparent 100%);
+    }
+
+    .bottom-bar-ticker-track {
+      position: relative;
+      top: 12px;
+      display: flex;
+      white-space: nowrap;
+      font-family: 'Sora', sans-serif;
+      font-weight: 800;
+      font-size: 26px;
+      letter-spacing: 1px;
+      color: #fff;
+      animation: bottomBarTickerScroll 180s linear infinite;
+    }
+
+    .bottom-bar-ticker-track span {
+      padding: 0 40px;
+    }
+
+    @keyframes bottomBarTickerScroll {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+
+    /* ==========================================================
+       NYTT DESIGN (matcher referansebildet "Topp8.png") - overstyrer
+       reglene fra style.css for meta-scenen spesifikt. Samme data/
+       funksjon som for (meta-scene.js er urort) - kun visuell stil.
+       ========================================================== */
+
+    .scene.scene-meta {
+      position: absolute !important;
+      inset: 0 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .meta-scene {
+      width: 1700px !important;
+      height: 735px !important;
+      max-width: 1700px !important;
+      max-height: 735px !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+      border-radius: 6px !important;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45) !important;
+    }
+
+    .meta-header {
+      width: 100% !important;
+      flex: 0 0 auto !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 24px !important;
+      padding: 22px 40px !important;
+      background: linear-gradient(90deg, #e0c9a8 0%, #fbf7d1 32%, #f3d9ab 63%, #fbf8d2 98%) !important;
+      box-sizing: border-box !important;
+    }
+
+    .meta-header-logo {
+      width: 56px !important;
+      height: 56px !important;
+      flex-shrink: 0 !important;
+      object-fit: contain !important;
+    }
+
+    .meta-title {
+      font-family: 'Sora', sans-serif !important;
+      font-weight: 800 !important;
+      font-size: 42px !important;
+      color: #1a1a1a !important;
+      line-height: 1.1 !important;
+      letter-spacing: 0.5px !important;
+    }
+
+    .meta-subtitle {
+      display: block !important;
+      font-family: 'Sora', sans-serif !important;
+      font-weight: 700 !important;
+      font-size: 18px !important;
+      color: #2a2a2a !important;
+      margin-top: 6px !important;
+      text-transform: uppercase !important;
+      letter-spacing: 0.3px !important;
+    }
+
+    .meta-year {
+      display: block !important;
+      font-family: 'Sora', sans-serif !important;
+      font-weight: 600 !important;
+      font-size: 16px !important;
+      color: #5a5a5a !important;
+      margin-top: 2px !important;
+      margin-left: 0 !important;
+    }
+
+    .meta-grid {
+      width: 100% !important;
+      flex: 1 1 auto !important;
+      display: grid !important;
+      grid-template-columns: 1fr 1fr !important;
+      gap: 6px !important;
+      min-height: 0 !important;
+      background: #000 !important;
+    }
+
+    .meta-table {
+      display: flex !important;
+      flex-direction: column !important;
+      min-height: 0 !important;
+    }
+
+    .meta-table-head {
+      flex: 0 0 auto !important;
+      display: grid !important;
+      grid-template-columns: 246px 171px 133px 265px !important;
+      background: #000 !important;
+      color: #fff !important;
+      font-family: 'Sora', sans-serif !important;
+      font-weight: 800 !important;
+      font-size: 15px !important;
+      letter-spacing: 0.5px !important;
+      padding: 12px 16px !important;
+      box-sizing: border-box !important;
+    }
+
+    .meta-rows {
+      flex: 1 1 auto !important;
+      display: flex !important;
+      flex-direction: column !important;
+      min-height: 0 !important;
+    }
+
+    .meta-row {
+      flex: 1 1 0 !important;
+      display: grid !important;
+      grid-template-columns: 246px 171px 133px 265px !important;
+      align-items: center !important;
+      border-bottom: 2px solid #000 !important;
+      padding: 0 16px !important;
+      box-sizing: border-box !important;
+      min-height: 0 !important;
+      overflow: hidden !important;
+    }
+
+    /* Sjakkbrett-monster hentet fra referansebildet: radene veksler
+       mellom en mork og en lys gradient, og venstre/hoyre tabell er
+       motsatt av hverandre pa samme radnummer. */
+    #metaLeftRows .meta-row:nth-child(odd),
+    #metaRightRows .meta-row:nth-child(even) {
+      background: linear-gradient(90deg, #8f0f1c 0%, #96111e 60%, #b31b29 100%) !important;
+    }
+
+    #metaLeftRows .meta-row:nth-child(even),
+    #metaRightRows .meta-row:nth-child(odd) {
+      background: linear-gradient(90deg, #ba1d2c 0%, #bf1d2c 60%, #e01c2f 100%) !important;
+    }
+
+    .meta-cell {
+      font-family: 'Sora', sans-serif !important;
+      color: #fff !important;
+      overflow: hidden !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+    }
+
+    .meta-cell.meta-archetype {
+      font-weight: 800 !important;
+      font-size: 19px !important;
+      text-transform: uppercase !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+    }
+
+    .meta-cell.meta-count,
+    .meta-cell.meta-share {
+      font-weight: 800 !important;
+      font-size: 19px !important;
+      text-align: center !important;
+    }
+
+    /* Make sure the key-card cell centers its content vertically, regardless of row height set in style.css */
+    .meta-cell.meta-keycard {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    .meta-keycard-container {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 0 !important;
+      width: 100% !important;
+    }
+
+    /* Scryfall key-card crops: shows only the top name/mana-cost strip of the card image.
+       Kortene overlapper med vilje (nederste kortet trekkes opp over det oeverste) - som
+       et fan-av-kort-utseende - i stedet for a stables adskilt. margin-top pa det andre
+       kortet styrer hvor mye overlapp; juster verdien hvis navn/manasymbol pa OEVERSTE
+       kortet dekkes. */
+    .meta-keycard-crop {
+      position: relative !important;
+      width: 100% !important;
+      max-width: 280px !important;
+      height: 34px !important;
+      flex: 0 0 34px !important;
+      overflow: hidden !important;
+      border-radius: 4px !important;
+      background: rgba(0, 0, 0, 0.35) !important;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5) !important;
+    }
+
+    .meta-keycard-crop + .meta-keycard-crop {
+      margin-top: -4px !important;
+      z-index: 2 !important;
+    }
+
+    .meta-keycard-crop-error {
+      font-size: 10px !important;
+      padding: 1px !important;
+      line-height: 1.1 !important;
+    }
+
+    .meta-keycard-crop-img {
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: auto !important;
+      display: block !important;
+    }
+
+    .meta-keycard-crop-error {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: #fff;
+      text-align: center;
+      padding: 2px 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="overlay" style="position:relative; width:1920px; height:1080px; overflow:hidden;">
+    <img class="bg" src="Plain1080p_background.png" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:-1; pointer-events:none;">
+    <div class="scene scene-meta is-active" data-scene="meta" style="position:absolute; left:0; top:0; width:1920px; height:1080px;">
+      <div class="meta-scene" style="position:absolute; left:110px; top:172px; width:1700px; height:735px; max-width:1700px; max-height:735px; display:flex; flex-direction:column; overflow:hidden;">
+        <div class="meta-header">
+          <img class="meta-header-logo" src="NMMTG_Ikon_farge_26_lg.png" alt="">
+          <div>
+            <div id="metaTitle" class="meta-title">META BREAKDOWN</div>
+            <div><span id="metaSubtitle" class="meta-subtitle">DAY 1 - TOP 64</span><span id="metaYear" class="meta-year">2026 NM</span></div>
+          </div>
+        </div>
+        <div class="meta-grid">
+          <div class="meta-table">
+            <div class="meta-table-head">
+              <div>ARCHETYPE</div>
+              <div>ANTALL DECK</div>
+              <div>ANDEL%</div>
+              <div>NØKKELKORT</div>
+            </div>
+            <div id="metaLeftRows" class="meta-rows"></div>
+          </div>
+          <div class="meta-table">
+            <div class="meta-table-head">
+              <div>ARCHETYPE</div>
+              <div>ANTALL DECK</div>
+              <div>ANDEL%</div>
+              <div>NØKKELKORT</div>
+            </div>
+            <div id="metaRightRows" class="meta-rows"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <img class="bottom-bar-image" src="bottomBarScroller.png" alt="">
+    <div class="bottom-bar-ticker">
+      <div id="bottomBarTickerTrack" class="bottom-bar-ticker-track"></div>
+    </div>
+  </div>
+  <script src="meta-scene.js"></script>
+  <script>
+    // Offisiell Apps Script-deployment-URL - MA vaere samme URL som
+    // script.js (WORKING_REMOTE_DATA_URL) bruker, siden dette er samme
+    // underliggende Apps Script-prosjekt. Hvis du redeployer og far en
+    // ny "New version" - denne URL-en endrer seg IKKE av det (samme
+    // /exec-URL forblir stabil sa lenge du redeployer den SAMME
+    // deploymenten, i stedet for a lage en helt ny deployment).
+    const DEFAULT_SHEETS_URL = "https://script.google.com/macros/s/AKfycbz3aep17Ul9e_PVGFBr-bOE71WBlXND_QKne07_bSwGduC3rOm7ITSjD1T3-O3olduG/exec";
+
+    const query = new URLSearchParams(window.location.search);
+    const SOURCE_MODE = String(query.get("source") || "sheets").trim().toLowerCase();
+    const POLL_MS = Math.max(parseInt(query.get("pollMs"), 10) || 2500, 250);
+    const DATA_URL = String(query.get("dataUrl") || DEFAULT_SHEETS_URL).trim();
+
+    let fetchInProgress = false;
+    let hasRendered = false;
+
+    function normalizeRows(rows) {
+      if (!Array.isArray(rows)) return [];
+
+      return rows.slice(0, 10).map((row) => ({
+        archetype: row?.archetype ?? row?.name ?? row?.deckName ?? row?.deck ?? "",
+        count: row?.count ?? row?.decks ?? row?.total ?? "",
+        share: row?.share ?? row?.percentage ?? row?.percent ?? "",
+        keyCard: row?.keyCard ?? row?.keycard ?? row?.card ?? "",
+        keyCard2: row?.keyCard2 ?? row?.keycard2 ?? "",
+        image: row?.image ?? row?.imageUrl ?? ""
+      }));
+    }
+
+    function mapMeleeToMeta(raw) {
+      const source = raw?.meta || raw?.metagame || raw?.data?.metagame || raw?.data?.meta || raw || {};
+
+      if (Array.isArray(source.rows) || Array.isArray(source.items) || Array.isArray(source.list)) {
+        return {
+          meta: {
+            title: source.title || "META BREAKDOWN",
+            subtitle: source.subtitle || "TOP 8",
+            year: source.year || "2026 NM",
+            rows: normalizeRows(source.rows || source.items || source.list)
+          }
+        };
+      }
+
+      if (Array.isArray(raw?.standings)) {
+        return {
+          meta: {
+            title: raw?.title || "META BREAKDOWN",
+            subtitle: raw?.subtitle || "TOP 8",
+            year: raw?.year || "2026 NM",
+            rows: normalizeRows(raw.standings)
+          }
+        };
+      }
+
+      return raw;
+    }
+
+    function adaptPayloadBySource(raw) {
+      if (SOURCE_MODE === "melee") {
+        return mapMeleeToMeta(raw);
+      }
+
+      return raw;
+    }
+
+    function fetchJsonp(url) {
+      return new Promise((resolve, reject) => {
+        if (!/^https?:\/\//i.test(url)) {
+          reject(new Error("JSONP request skipped: DATA_URL is not a valid absolute URL: '" + url + "'"));
+          return;
+        }
+
+        const callbackName = "metaOverlayCb" + Date.now() + "_" + Math.floor(Math.random() * 1e6);
+        const script = document.createElement("script");
+        let settled = false;
+
+        function cleanup() {
+          delete window[callbackName];
+          if (script.parentNode) script.parentNode.removeChild(script);
+          clearTimeout(timeoutId);
+        }
+
+        window[callbackName] = function (data) {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(data);
+        };
+
+        script.onerror = function () {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("JSONP request failed for URL: " + script.src));
+        };
+
+        const separator = url.indexOf("?") >= 0 ? "&" : "?";
+        script.src = url + separator + "callback=" + callbackName;
+        console.log("[META] requesting", script.src);
+        document.head.appendChild(script);
+
+        const timeoutId = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("JSONP request timed out"));
+        }, 20000);
+      });
+    }
+
+    async function fetchAndRenderMeta() {
+      if (fetchInProgress) return;
+      fetchInProgress = true;
+
+      try {
+        // Henter fra den lokale desktop-appen sitt /api/scenes/meta -
+        // egen REST-endepunkt (ikke WebSocket) siden meta breakdown
+        // involverer et cachet kall mot Melee sitt decklist-endepunkt,
+        // se server/melee.ts::getMeleeMetaBreakdown.
+        const res = await fetch("http://localhost:4848/api/scenes/meta", { cache: "no-store" });
+        if (!res.ok) throw new Error("Meta fetch failed: " + res.status);
+        const metaData = await res.json();
+        window.overlayScenes.meta.render({ meta: metaData });
+        hasRendered = true;
+      } catch (error) {
+        console.error("[META] fetch/render failed", error);
+        if (!hasRendered) {
+          window.overlayScenes.meta.render({});
+          hasRendered = true;
+        }
+      } finally {
+        fetchInProgress = false;
+      }
+    }
+
+    window.overlayScenes.meta.render({});
+    hasRendered = true;
+    setInterval(fetchAndRenderMeta, POLL_MS);
+    fetchAndRenderMeta();
+  </script>
+
+  <script>
+    // Skalerer det faste 1920x1080-designet ned/opp til a fylle det
+    // faktiske vinduet/OBS Browser Source-storrelsen, med riktig
+    // bilde-proporsjon bevart og sentrert.
+    (function () {
+      const overlay = document.querySelector(".overlay");
+      if (!overlay) return;
+
+      function scaleOverlay() {
+        const scaleX = window.innerWidth / 1920;
+        const scaleY = window.innerHeight / 1080;
+        const scale = Math.min(scaleX, scaleY);
+        const offsetX = (window.innerWidth - 1920 * scale) / 2;
+        const offsetY = (window.innerHeight - 1080 * scale) / 2;
+        overlay.style.transformOrigin = "top left";
+        overlay.style.transform = "translate(" + offsetX + "px, " + offsetY + "px) scale(" + scale + ")";
+      }
+
+      window.addEventListener("resize", scaleOverlay);
+      scaleOverlay();
+    })();
+  </script>
+<script>
+    // Rullende tekst nederst - hentet fra desktop-appen sin lokale
+    // /api/settings/stream-content (satt via Stream-fanen i appen),
+    // i stedet for den gamle Apps Script-baserte JSONP-hentingen.
+    (function () {
+      const POLL_MS = 5000;
+      let lastTickerText = null;
+
+      function updateTicker(text) {
+        const track = document.getElementById("bottomBarTickerTrack");
+        if (!track || text === lastTickerText) return;
+        lastTickerText = text;
+
+        const repeated = Array(10).fill(text).map(function (t) {
+          return "<span>" + t + "</span>";
+        }).join("");
+        track.innerHTML = repeated + repeated;
+      }
+
+      async function updateBottomBarTicker() {
+        try {
+          const res = await fetch("http://localhost:4848/api/settings/stream-content", { cache: "no-store" });
+          if (!res.ok) return;
+          const data = await res.json();
+          const tickerText = String(data?.tickerText || "").trim() || "SCROLLING INFO >>>>>";
+          updateTicker(tickerText);
+        } catch (err) {
+          console.error("[BOTTOM-BAR-TICKER]", err);
+        }
+      }
+
+      updateBottomBarTicker();
+      setInterval(updateBottomBarTicker, POLL_MS);
+    })();
+  </script>
+</body>
+</html>

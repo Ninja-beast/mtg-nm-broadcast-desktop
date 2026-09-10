@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MTG Top 8 Bracket Overlay</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
+
+    .bottom-bar-image {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 1920px;
+      height: auto;
+      display: block;
+      z-index: 30;
+    }
+
+    .bottom-bar-ticker {
+      position: absolute;
+      left: 0;
+      bottom: -3px;
+      width: 1750px;
+      height: 70px;
+      overflow: hidden;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      padding-left: 40px;
+      box-sizing: border-box;
+      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 85%, transparent 100%);
+      mask-image: linear-gradient(to right, #000 0%, #000 85%, transparent 100%);
+    }
+
+    .bottom-bar-ticker-track {
+      position: relative;
+      top: 12px;
+      display: flex;
+      white-space: nowrap;
+      font-family: 'Sora', sans-serif;
+      font-weight: 800;
+      font-size: 26px;
+      letter-spacing: 1px;
+      color: #fff;
+      animation: bottomBarTickerScroll 180s linear infinite;
+    }
+
+    .bottom-bar-ticker-track span {
+      padding: 0 40px;
+    }
+
+    @keyframes bottomBarTickerScroll {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      color: #fff;
+      font-family: 'Sora', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .overlay {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      text-transform: uppercase;
+      transform-origin: top center;
+    }
+
+    .top-band {
+      height: 154px;
+      background: linear-gradient(90deg, #2f91d4 0%, #2d89c7 72%, rgba(45, 137, 199, 0) 100%);
+      padding: 18px 0 0 226px;
+      box-sizing: border-box;
+    }
+
+    .title {
+      font-size: 62px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: 0.4px;
+    }
+
+    .subtitle-row {
+      margin-top: 9px;
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+    }
+
+    .subtitle {
+      font-size: 37px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .year {
+      font-size: 30px;
+      font-weight: 400;
+      line-height: 1;
+      opacity: 0.95;
+    }
+
+    .round-head {
+      height: 86px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      align-items: center;
+      text-align: center;
+      font-size: 57px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      color: #1a1a1a;
+    }
+
+    /* Tittel og rundenavn ligger na bakt inn i selve bakgrunnsbildet
+       (BracketsTop8-bg.png), sa disse to skjules visuelt i stedet for
+       a fjernes helt - JS-en som setter innerText pa dem kjorer fortsatt
+       helt som for, bare usynlig. NB: dette betyr at tittel/rundenavn
+       IKKE lenger oppdateres visuelt hvis dataene fra arket endrer seg
+       (de star na fast som "TOPP 8 SLUTTSPILL / DAG 2 / 2026 NM" og
+       "KVARTFINALE / SEMIFINALE / FINALE" slik bakgrunnsbildet viser).
+       Si ifra hvis tittelen skal fortsette a vaere live i stedet. */
+    .top-band,
+    .round-head {
+      display: none;
+    }
+
+    /* Reposisjonert til å treffe eksakt de faktiske boks-posisjonene i
+       BracketsTop8-bg.png (malt direkte fra bildet - identisk med de
+       opprinnelige koordinatene fra det fulle referansebildet, bare
+       med bildet croppet/forenklet). Hver kamp plasseres nå med
+       absolutte pixel-koordinater (satt i JS via MATCH_SLOTS) i stedet
+       for CSS Grid, siden boksene i dette bildet ikke følger et jevnt
+       1fr/1fr/1fr-rutenett. */
+    .body {
+      position: absolute;
+      inset: 0;
+    }
+
+    .match {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      gap: 11px;
+      z-index: 1;
+    }
+
+    .card {
+      width: 524px;
+      height: 61px;
+      box-sizing: border-box;
+      display: grid;
+      grid-template-columns: 1fr 64px;
+      background: transparent;
+    }
+
+    .card.is-empty {
+      background: transparent;
+      opacity: 1;
+    }
+
+    .main {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 4px;
+      padding: 0 14px;
+      box-sizing: border-box;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .name {
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      letter-spacing: 0.2px;
+      max-width: 100%;
+    }
+
+    .deck {
+      font-size: 15px;
+      font-weight: 400;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0.98;
+      max-width: 100%;
+    }
+
+    .score {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      box-sizing: border-box;
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1;
+      background: transparent;
+    }
+
+    .card.is-empty .score {
+      background: transparent;
+    }
+
+    /* Bracket-forbindelseslinjene tegnes i dette SVG-laget. Ligger NA
+       OVER selve kort-boksene (hoyere z-index enn .match) slik at den
+       lille overlappen (LINE_OVERLAP_PX) linjene tegnes med faktisk
+       er synlig helt inn mot boks-kanten, i stedet for a bli skjult
+       bak den ugjennomsiktige boksen (som var tilfellet for da linjene
+       la BAK boksene - overlappen var da usynlig uansett storrelse). */
+    #bracketLines {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 2;
+      display: none;
+    }
+
+  </style>
+</head>
+<body>
+  <div class="overlay">
+    <img class="bg" src="Plain1080p_background.png" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:-1; pointer-events:none;">
+    <img class="bg" src="BracketsTop8-bg.png" alt="" style="position:absolute; left:105px; top:59px; width:1712px; height:909px; z-index:-1; pointer-events:none;">
+    <div class="top-band">
+      <div id="title" class="title">TOP 8 MODERN</div>
+      <div class="subtitle-row">
+        <div id="subtitle" class="subtitle">DAY 2</div>
+        <div id="year" class="year">2026 NM</div>
+      </div>
+    </div>
+
+    <div class="round-head">
+      <div>KVARTFINALE</div>
+      <div>SEMIFINALE</div>
+      <div>FINALE</div>
+    </div>
+
+    <div class="body">
+      <svg id="bracketLines"></svg>
+      <div id="quarter" class="col col-quarter"></div>
+      <div id="semi" class="col col-semi"></div>
+      <div id="final" class="col col-final"></div>
+    </div>
+    <img class="bottom-bar-image" src="bottomBarScroller.png" alt="">
+    <div class="bottom-bar-ticker">
+      <div id="bottomBarTickerTrack" class="bottom-bar-ticker-track"></div>
+    </div>
+  </div>
+
+  <script>
+    const DEFAULT_DATA_URL = "https://script.google.com/macros/s/AKfycbz3aep17Ul9e_PVGFBr-bOE71WBlXND_QKne07_bSwGduC3rOm7ITSjD1T3-O3olduG/exec";
+    const query = new URLSearchParams(window.location.search);
+    const DATA_URL = String(query.get("dataUrl") || DEFAULT_DATA_URL).trim();
+    const POLL_MS = Math.max(parseInt(query.get("pollMs"), 10) || 2500, 250);
+    const DEMO_MODE = query.get("demo") === "1";
+
+    // Standard Top 8-form: alltid 4 kvartfinaler, 2 semifinaler, 1
+    // finale - uansett hvor mye data som faktisk er fylt inn enda.
+    // Det er det som gjor at hele skjelettet (bokser + linjer) alltid
+    // vises fra start, og bare fylles med ekte navn/deck/score etter
+    // hvert som det kommer inn fra kontrollpanelet.
+    const QUARTER_COUNT = 4;
+    const SEMI_COUNT = 2;
+    const FINAL_COUNT = 1;
+
+    let inFlight = false;
+    let hasRendered = false;
+    let lastRenderSignature = "";
+    let resizeRedrawFrame = null;
+
+    function readText(value, fallback) {
+      const text = String(value ?? "").trim();
+      return text || fallback;
+    }
+
+    function readSource(data) {
+      return (
+        data?.bracket
+        || data?.top8
+        || data?.topEight
+        || data?.playoff?.bracket
+        || data?.playoff
+        || data?.sceneData?.bracket
+        || data?.sceneData?.top8
+        || data
+        || {}
+      );
+    }
+
+    function readRound(source, keys) {
+      for (const key of keys) {
+        if (Array.isArray(source?.[key])) return source[key];
+        if (Array.isArray(source?.bracket?.[key])) return source.bracket[key];
+        if (Array.isArray(source?.rounds?.[key])) return source.rounds[key];
+      }
+
+      const flatMatches = Array.isArray(source?.matches)
+        ? source.matches
+        : Array.isArray(source?.rows)
+          ? source.rows
+          : Array.isArray(source?.items)
+            ? source.items
+            : [];
+
+      if (!flatMatches.length) return [];
+
+      const normalizedKeys = keys.map((key) => normalizeRoundKey(key));
+      return flatMatches.filter((match) => normalizedKeys.includes(normalizeRoundKey(match?.round ?? match?.stage ?? match?.runde)));
+    }
+
+    function normalizeRoundKey(value) {
+      return String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/kvartfinale|quarterfinals?|quarters?/g, "quarter")
+        .replace(/semifinale|semifinals?|semis?/g, "semi")
+        .replace(/grandfinale?|finale|finals?/g, "final")
+        .replace(/[^a-z]/g, "");
+    }
+
+    function demoData() {
+      return {
+        title: "TOP 8 MODERN",
+        subtitle: "DAY 2",
+        year: "2026 NM",
+        quarter: [
+          { p1: { name: "Kim-Andre Johannessen", deck: "Boros Aggro", score: 2 }, p2: { name: "Marion Midtlie", deck: "Ruby Storm", score: 1 } },
+          { p1: { name: "Michel Kruithof", deck: "Death and Taxes", score: 2 }, p2: { name: "Sem Kruithof", deck: "Boros Aggro", score: 1 } },
+          { p1: { name: "Barbra Streisand", deck: "Urza Tron", score: 2 }, p2: { name: "Trond Johannessen", deck: "Affinity", score: 1 } },
+          { p1: { name: "Solan Gundersen", deck: "Amulet Titan", score: 0 }, p2: { name: "Magnus Tangen", deck: "Boros Aggro", score: 2 } }
+        ],
+        semi: [
+          { p1: { name: "Kim-Andre Johannessen", deck: "Boros Aggro", score: 0 }, p2: { name: "Michel Kruithof", deck: "Death and Taxes", score: 2 } },
+          { p1: { name: "Trond Johannessen", deck: "Affinity", score: 0 }, p2: { name: "Magnus Tangen", deck: "Boros Aggro", score: 2 } }
+        ],
+        final: [
+          { p1: { name: "Michel Kruithof", deck: "Death and Taxes", score: 2 }, p2: { name: "Magnus Tangen", deck: "Boros Aggro", score: 1 } }
+        ]
+      };
+    }
+
+    // En tom kamp - brukes til a fylle ut plassholder-bokser for
+    // slots det ikke finnes data for enda.
+    function emptyMatch() {
+      return {
+        p1: { name: "", deck: "", score: "" },
+        p2: { name: "", deck: "", score: "" }
+      };
+    }
+
+    function normalizeMatch(raw) {
+      if (!raw) return emptyMatch();
+
+      return {
+        p1: {
+          name: readText(raw?.p1?.name ?? raw?.player1?.name ?? raw?.player1Name ?? raw?.player1, ""),
+          deck: readText(raw?.p1?.deck ?? raw?.player1?.deck ?? raw?.player1Deck ?? raw?.deck1, ""),
+          score: readText(raw?.p1?.score ?? raw?.player1?.score ?? raw?.player1Score ?? raw?.score1, "")
+        },
+        p2: {
+          name: readText(raw?.p2?.name ?? raw?.player2?.name ?? raw?.player2Name ?? raw?.player2, ""),
+          deck: readText(raw?.p2?.deck ?? raw?.player2?.deck ?? raw?.player2Deck ?? raw?.deck2, ""),
+          score: readText(raw?.p2?.score ?? raw?.player2?.score ?? raw?.player2Score ?? raw?.score2, "")
+        }
+      };
+    }
+
+    // Fyller alltid opp til det faste antallet slots for runden
+    // (4/2/1), med tomme plassholder-kamper der data mangler.
+    function padRound(matches, count) {
+      const list = Array.isArray(matches) ? matches.slice(0, count) : [];
+      while (list.length < count) {
+        list.push(null);
+      }
+      return list;
+    }
+
+    // Pixel-eksakte posisjoner for hver kamp-boks, malt direkte fra
+    // BracketsTop8-bg.png (identiske koordinater som det opprinnelige
+    // referansebildet - samme design, bare croppet/forenklet). Kvart-
+    // kolonnen har 4 faste topp-posisjoner, semi 2, finale 1.
+    const MATCH_SLOTS = {
+      quarter: { left: 144, width: 524, tops: [291, 460, 628, 798] },
+      semi: { left: 697, width: 523, tops: [385, 722] },
+      final: { left: 1260, width: 523, tops: [553] }
+    };
+    const CARD_HEIGHT = 61;
+    const CARD_GAP = 11;
+
+    function positionMatch(matchEl, round, index) {
+      const slot = MATCH_SLOTS[round];
+      if (!slot) return;
+
+      matchEl.style.left = slot.left + "px";
+      matchEl.style.top = slot.tops[index] + "px";
+      matchEl.style.width = slot.width + "px";
+      matchEl.style.height = (CARD_HEIGHT * 2 + CARD_GAP) + "px";
+    }
+
+    function card(player) {
+      const el = document.createElement("div");
+      el.className = "card";
+
+      const isEmpty = !player.name && !player.deck && player.score === "";
+      if (isEmpty) el.classList.add("is-empty");
+
+      const main = document.createElement("div");
+      main.className = "main";
+
+      const name = document.createElement("div");
+      name.className = "name";
+      name.innerText = player.name;
+
+      const deck = document.createElement("div");
+      deck.className = "deck";
+      deck.innerText = player.deck;
+
+      const score = document.createElement("div");
+      score.className = "score";
+      score.innerText = player.score;
+
+      main.appendChild(name);
+      main.appendChild(deck);
+      el.appendChild(main);
+      el.appendChild(score);
+      return el;
+    }
+
+    function renderRound(containerId, rawMatches, round, quarterCount, slotCount) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      container.innerHTML = "";
+
+      const padded = padRound(rawMatches, slotCount);
+
+      padded.forEach((raw, index) => {
+        const match = normalizeMatch(raw);
+        const matchEl = document.createElement("div");
+        matchEl.className = "match";
+        matchEl.dataset.round = round;
+        matchEl.dataset.index = String(index);
+        positionMatch(matchEl, round, index);
+        matchEl.appendChild(card(match.p1));
+        matchEl.appendChild(card(match.p2));
+        container.appendChild(matchEl);
+
+        // Krymper skriften kun for navn som faktisk ikke far plass
+        // (i stedet for at de bare kuttes med "...") - samme fiks som
+        // Topp16-listene bruker. Ma skje ETTER at raden er lagt til i
+        // DOM-en, siden vi trenger den ekte, gjengitte bredden.
+        matchEl.querySelectorAll(".name").forEach(shrinkNameToFit);
+      });
+    }
+
+    function shrinkNameToFit(el) {
+      if (!el) return;
+      let fontSize = parseFloat(window.getComputedStyle(el).fontSize);
+      const minFontSize = fontSize * 0.32;
+      while (el.scrollWidth > el.clientWidth && fontSize > minFontSize) {
+        fontSize -= 1;
+        el.style.fontSize = fontSize + "px";
+      }
+    }
+
+    // Tegner bracket-forbindelseslinjene: fra hoyre kant av hvert
+    // kvartfinale-par til venstre kant av semifinalen de forer inn i,
+    // og tilsvarende fra semifinaler til finalen. Rene rette linjer
+    // (vannrett -> loddrett -> vannrett), samme monster som et
+    // standard turnerings-bracket-diagram.
+    function drawBracketLines() {
+      const svg = document.getElementById("bracketLines");
+      const body = document.querySelector(".body");
+      if (!svg || !body) return;
+
+      const bodyRect = body.getBoundingClientRect();
+      svg.setAttribute("viewBox", `0 0 ${bodyRect.width} ${bodyRect.height}`);
+      svg.innerHTML = "";
+
+      function rectRelativeTo(el) {
+        const r = el.getBoundingClientRect();
+        return {
+          left: r.left - bodyRect.left,
+          right: r.right - bodyRect.left,
+          top: r.top - bodyRect.top,
+          bottom: r.bottom - bodyRect.top,
+          centerY: (r.top + r.bottom) / 2 - bodyRect.top
+        };
+      }
+
+      function addLine(x1, y1, x2, y2) {
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", x1);
+        line.setAttribute("y1", y1);
+        line.setAttribute("x2", x2);
+        line.setAttribute("y2", y2);
+        line.setAttribute("stroke", "#000");
+        line.setAttribute("stroke-width", "2");
+        line.setAttribute("stroke-linecap", "square");
+        svg.appendChild(line);
+      }
+
+      function connect(fromEls, toEl) {
+        if (!toEl || fromEls.some((el) => !el)) return;
+
+        const TARGET_STUB_PX = 20;
+        const TRUNK_FROM_SOURCE_PX = 24;
+
+        const toRect = rectRelativeTo(toEl);
+        const fromRects = fromEls.map(rectRelativeTo);
+        const sourceRight = fromRects[0].right;
+        const maxTrunkX = toRect.left - TARGET_STUB_PX - 2;
+        const trunkX = Math.min(sourceRight + TRUNK_FROM_SOURCE_PX, maxTrunkX);
+        const targetIntoCardX = toRect.left + TARGET_STUB_PX;
+
+        fromRects.forEach((fromRect) => {
+          addLine(fromRect.right, fromRect.centerY, trunkX, fromRect.centerY);
+        });
+
+        addLine(trunkX, fromRects[0].centerY, trunkX, fromRects[fromRects.length - 1].centerY);
+        addLine(trunkX, toRect.centerY, targetIntoCardX, toRect.centerY);
+
+        // Malingen ovenfor treffer bare midt i det tomme mellomrommet
+        // MELLOM de to kortene i mal-kampen (toEl) - synlig som en
+        // linje som stopper i tomrom i stedet for a treffe en boks.
+        // Denne korte loddrette "T"-en speiler bracket-foten pa
+        // kilde-siden: den strekker seg fra bunnen av det ovre kortet
+        // til toppen av det nedre kortet, slik at streken faktisk
+        // beroerer begge boksene i stedet for a stoppe i gapet.
+        const toCards = Array.from(toEl.querySelectorAll(".card"));
+        if (toCards.length === 2) {
+          const topCardRect = rectRelativeTo(toCards[0]);
+          const bottomCardRect = rectRelativeTo(toCards[1]);
+          addLine(targetIntoCardX, topCardRect.bottom, targetIntoCardX, bottomCardRect.top);
+        }
+      }
+
+      const quarterEls = Array.from(document.querySelectorAll('.match[data-round="quarter"]'));
+      const semiEls = Array.from(document.querySelectorAll('.match[data-round="semi"]'));
+      const finalEls = Array.from(document.querySelectorAll('.match[data-round="final"]'));
+
+      semiEls.forEach((semiEl, i) => {
+        connect([quarterEls[i * 2], quarterEls[i * 2 + 1]], semiEl);
+      });
+
+      finalEls.forEach((finalEl) => {
+        connect([semiEls[0], semiEls[1]], finalEl);
+      });
+    }
+
+    function scheduleRedraw() {
+      if (resizeRedrawFrame != null) return;
+      resizeRedrawFrame = requestAnimationFrame(() => {
+        resizeRedrawFrame = null;
+        drawBracketLines();
+      });
+    }
+
+    function render(data) {
+      const source = readSource(data);
+      hasRendered = true;
+
+      const quarter = readRound(source, ["quarter", "quarters", "quarterfinals"]);
+      const semi = readRound(source, ["semi", "semis", "semifinals"]);
+      const final = readRound(source, ["final", "finals", "grandFinal"]);
+
+      const titleText = readText(source.title ?? data?.sceneTitle, "TOP 8 MODERN");
+      const subtitleText = readText(source.subtitle ?? data?.sceneSubtitle, "DAY 2");
+      const yearText = readText(source.year ?? data?.sceneYear, "2026 NM");
+
+      const signature = JSON.stringify({
+        title: titleText,
+        subtitle: subtitleText,
+        year: yearText,
+        quarter: padRound(quarter, QUARTER_COUNT).map(normalizeMatch),
+        semi: padRound(semi, SEMI_COUNT).map(normalizeMatch),
+        final: padRound(final, FINAL_COUNT).map(normalizeMatch)
+      });
+
+      if (signature === lastRenderSignature) {
+        return;
+      }
+      lastRenderSignature = signature;
+
+      const titleEl = document.getElementById("title");
+      const subtitleEl = document.getElementById("subtitle");
+      const yearEl = document.getElementById("year");
+
+      if (titleEl) titleEl.innerText = titleText;
+      if (subtitleEl) subtitleEl.innerText = subtitleText;
+      if (yearEl) yearEl.innerText = yearText;
+
+      renderRound("quarter", quarter, "quarter", QUARTER_COUNT, QUARTER_COUNT);
+      renderRound("semi", semi, "semi", QUARTER_COUNT, SEMI_COUNT);
+      renderRound("final", final, "final", QUARTER_COUNT, FINAL_COUNT);
+
+      scheduleRedraw();
+    }
+
+    function fitOverlay() {
+      const overlay = document.querySelector(".overlay");
+      if (!overlay) return;
+
+      const scaleX = window.innerWidth / 1920;
+      const scaleY = window.innerHeight / 1080;
+      const scale = Math.min(scaleX, scaleY);
+
+      overlay.style.transform = `scale(${scale})`;
+      scheduleRedraw();
+    }
+
+    // Google Apps Script blokkerer CORS-forespørsler fra en "null"
+    // opphavsadresse, som er nettopp det file://-sider sender. JSONP
+    // omgar dette ved a laste svaret som en <script>-tag i stedet for
+    // en fetch/XHR-forespørsel - script-tags er ikke underlagt samme
+    // CORS-begrensning, sa dette fungerer fortsatt nar filen apnes
+    // direkte i stedet for gjennom en server.
+    function fetchJSONP(url) {
+      return new Promise((resolve, reject) => {
+        const callbackName = "bracketCb_" + Date.now() + "_" + Math.floor(Math.random() * 100000);
+        const script = document.createElement("script");
+        let settled = false;
+
+        function cleanup() {
+          delete window[callbackName];
+          if (script.parentNode) script.parentNode.removeChild(script);
+        }
+
+        window[callbackName] = (data) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(data);
+        };
+
+        script.onerror = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("JSONP request failed: " + url));
+        };
+
+        const separator = url.includes("?") ? "&" : "?";
+        script.src = url + separator + "callback=" + callbackName;
+        document.head.appendChild(script);
+
+        setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("JSONP request timed out: " + url));
+        }, 60000);
+      });
+    }
+
+    async function fetchBracketData(url) {
+      if (window.location.protocol === "file:") {
+        return fetchJSONP(url);
+      }
+
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Bracket fetch failed: " + response.status);
+      }
+      return response.json();
+    }
+
+    // Kobler direkte til den lokale desktop-appen sin WebSocket i
+    // stedet for a polle Apps Script - render(data) er UENDRET,
+    // mottar samme datastruktur (data.bracket.quarter/semi/final) som
+    // for.
+    function connectLocalWebSocket() {
+      const socket = new WebSocket("ws://localhost:4848/ws");
+
+      socket.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "state") render(msg.data);
+        } catch (err) {
+          console.error("[BRACKET TOP8] Klarte ikke tolke melding fra server", err);
+        }
+      };
+
+      socket.onclose = () => {
+        setTimeout(connectLocalWebSocket, 2000);
+      };
+
+      socket.onerror = () => socket.close();
+    }
+
+    fitOverlay();
+    window.addEventListener("resize", fitOverlay);
+
+    render(DEMO_MODE ? demoData() : {});
+    connectLocalWebSocket();
+  </script>
+<script>
+    // Rullende tekst nederst - hentet fra desktop-appen sin lokale
+    // /api/settings/stream-content (satt via Stream-fanen i appen),
+    // i stedet for den gamle Apps Script-baserte JSONP-hentingen.
+    (function () {
+      const POLL_MS = 5000;
+      let lastTickerText = null;
+
+      function updateTicker(text) {
+        const track = document.getElementById("bottomBarTickerTrack");
+        if (!track || text === lastTickerText) return;
+        lastTickerText = text;
+
+        const repeated = Array(10).fill(text).map(function (t) {
+          return "<span>" + t + "</span>";
+        }).join("");
+        track.innerHTML = repeated + repeated;
+      }
+
+      async function updateBottomBarTicker() {
+        try {
+          const res = await fetch("http://localhost:4848/api/settings/stream-content", { cache: "no-store" });
+          if (!res.ok) return;
+          const data = await res.json();
+          const tickerText = String(data?.tickerText || "").trim() || "SCROLLING INFO >>>>>";
+          updateTicker(tickerText);
+        } catch (err) {
+          console.error("[BOTTOM-BAR-TICKER]", err);
+        }
+      }
+
+      updateBottomBarTicker();
+      setInterval(updateBottomBarTicker, POLL_MS);
+    })();
+  </script>
+</body>
+</html>

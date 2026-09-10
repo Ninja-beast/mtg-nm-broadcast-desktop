@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<title>MTG NM Overlay (Desktop)</title>
+<style>
+  html, body {
+    margin: 0;
+    background: transparent;
+    font-family: 'Segoe UI', sans-serif;
+    color: #fff;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+  }
+
+  .bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-between;
+    padding: 20px 40px;
+    background: linear-gradient(90deg, rgba(225,29,72,0.85), rgba(11,18,32,0.6));
+  }
+
+  .player {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .player.p2 { text-align: right; align-items: flex-end; }
+
+  .name { font-size: 34px; font-weight: 800; }
+  .deck { font-size: 18px; opacity: 0.85; text-transform: uppercase; }
+  .life { font-size: 44px; font-weight: 800; }
+  .status { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 14px; opacity: 0.6; }
+</style>
+</head>
+<body>
+
+  <div class="bar">
+    <div class="player p1">
+      <div class="name" id="p1name">SPILLER 1</div>
+      <div class="deck" id="p1deck">DECK</div>
+      <div class="life" id="p1life">20</div>
+    </div>
+    <div class="player p2">
+      <div class="name" id="p2name">SPILLER 2</div>
+      <div class="deck" id="p2deck">DECK</div>
+      <div class="life" id="p2life">20</div>
+    </div>
+  </div>
+
+  <div class="status" id="connectionStatus">Kobler til lokal server...</div>
+
+<script>
+  // Kobler direkte til den lokale WebSocket-serveren i Electron-appen
+  // (server/api.ts) - INGEN polling, INGEN ekstern kvote a bekymre seg
+  // for lenger, siden alt kjorer pa samme maskin som OBS.
+  const WS_URL = "ws://localhost:4848/ws";
+  let socket = null;
+
+  function connect() {
+    socket = new WebSocket(WS_URL);
+
+    socket.onopen = () => {
+      document.getElementById("connectionStatus").innerText = "Tilkoblet";
+    };
+
+    socket.onclose = () => {
+      document.getElementById("connectionStatus").innerText = "Mistet forbindelse - prover igjen...";
+      setTimeout(connect, 2000);
+    };
+
+    socket.onerror = () => {
+      socket.close();
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "state") render(msg.data);
+      } catch (err) {
+        console.error("Klarte ikke tolke melding fra server", err);
+      }
+    };
+  }
+
+  function render(state) {
+    const bo3 = state.bo3;
+    if (!bo3) return;
+
+    document.getElementById("p1name").innerText = (bo3.player1.name || "SPILLER 1").toUpperCase();
+    document.getElementById("p1deck").innerText = (bo3.player1.deck || "").toUpperCase();
+    document.getElementById("p1life").innerText = bo3.player1.life;
+
+    document.getElementById("p2name").innerText = (bo3.player2.name || "SPILLER 2").toUpperCase();
+    document.getElementById("p2deck").innerText = (bo3.player2.deck || "").toUpperCase();
+    document.getElementById("p2life").innerText = bo3.player2.life;
+  }
+
+  connect();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,65 @@
+/* WIN LAYER CONTAINER */
+.win-layer{
+  position:absolute;
+  width:1920px;
+  height:1080px;
+  left:0;
+  top:0;
+  pointer-events:none;
+  z-index:50;
+}
+
+/* GAME / MATCH WIN IMAGES */
+.win-img{
+  position:absolute;
+  opacity:0;
+  transform:translateY(-40px);
+  transition:opacity .5s ease, transform .5s ease;
+  z-index:51;
+}
+
+.win-img.show{
+  opacity:1;
+  transform:translateY(0);
+}
+
+/* MATCH OVER IMAGE */
+.match-over-img{
+  transform:none;
+}
+
+.match-over-img.show{
+  opacity:1;
+}
+
+/* WINNER TEXT */
+.win-text{
+  position:absolute;
+  top:468px;
+  left:50%;
+  transform:translateX(-50%);
+  font-size:48px;
+  font-weight:800;
+  display:none;
+  opacity:0;
+  white-space:nowrap;
+  animation:rainbow 4s linear infinite;
+  z-index:52;
+  text-transform:uppercase;
+}
+
+.win-text.show{
+  display:block;
+  opacity:1;
+}
+
+/* RAINBOW COLOR ANIMATION */
+@keyframes rainbow{
+  0%{color:#ff0000}
+  16%{color:#ff9900}
+  33%{color:#ffff00}
+  50%{color:#00ff00}
+  66%{color:#0099ff}
+  83%{color:#6633ff}
+  100%{color:#ff0000}
+}

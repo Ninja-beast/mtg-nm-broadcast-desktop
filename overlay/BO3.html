@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MTG Overlay</title>
+<style>
+    .bottom-bar-image {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 1920px;
+      height: auto;
+      display: block;
+      z-index: 30;
+    }
+
+    .bottom-bar-ticker {
+      position: absolute;
+      left: 0;
+      bottom: -3px;
+      width: 1750px;
+      height: 70px;
+      overflow: hidden;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      padding-left: 40px;
+      box-sizing: border-box;
+      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 85%, transparent 100%);
+      mask-image: linear-gradient(to right, #000 0%, #000 85%, transparent 100%);
+    }
+
+    .bottom-bar-ticker-track {
+      position: relative;
+      top: 12px;
+      display: flex;
+      white-space: nowrap;
+      font-family: 'Sora', sans-serif;
+      font-weight: 800;
+      font-size: 26px;
+      letter-spacing: 1px;
+      color: #fff;
+      animation: bottomBarTickerScroll 180s linear infinite;
+    }
+
+    .bottom-bar-ticker-track span {
+      padding: 0 40px;
+    }
+
+    @keyframes bottomBarTickerScroll {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+
+</style>
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="win-overlay.css">
+
+</head>
+<body>
+
+<div class="overlay">
+
+  <div class="scene scene-match is-active" data-scene="match">
+
+  <img class="bg" src="AlphaMask.png" alt="">
+  <img class="bg bg-playerinfo" src="PlayerInfo1080p.png" alt="">
+
+  <!-- PLAYER 1 -->
+  <div class="player player1">
+    <div class="top-line">
+      <div id="p1life" class="life">20</div>
+      <div id="p1score" class="score-bar">
+        <div class="segment"></div>
+        <div class="segment"></div>
+      </div>
+      <div class="name-column">
+        <div class="name-wrap">
+          <img id="p1flag" class="player-flag" alt="P1 flag">
+          <div id="p1name" class="name">PLAYER1</div>
+        </div>
+        <div class="bottom-line">
+          <div id="p1deck" class="deck">DECK</div>
+          <div id="p1record" class="record">0-0-0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PLAYER 2 -->
+  <div class="player player2">
+    <div class="top-line">
+      <div class="name-column">
+        <div class="name-wrap">
+          <div id="p2name" class="name">PLAYER2</div>
+          <img id="p2flag" class="player-flag" alt="P2 flag">
+        </div>
+        <div class="bottom-line">
+          <div id="p2deck" class="deck">DECK</div>
+          <div id="p2record" class="record">0-0-0</div>
+        </div>
+      </div>
+      <div id="p2score" class="score-bar">
+        <div class="segment"></div>
+        <div class="segment"></div>
+      </div>
+      <div id="p2life" class="life">20</div>
+    </div>
+  </div>
+
+  <!-- CARD SHOWCASE (bottom of screen) -->
+  <div class="card-showcase-wrap card-showcase-wrap-p1">
+    <img id="p1cardShowcase" class="card-showcase" alt="">
+  </div>
+  <div class="card-showcase-wrap card-showcase-wrap-p2">
+    <img id="p2cardShowcase" class="card-showcase" alt="">
+  </div>
+
+  <!-- GAME INFO -->
+  <div id="gameInfo" class="game-info">
+    <div id="format" class="format-label"></div>
+    <div class="game-info-row">
+      <div id="round" class="round-label"></div>
+      <div class="game-info-divider"></div>
+      <div id="timerDisplay" class="timer-display">50:00</div>
+    </div>
+    <div id="level"></div>
+  </div>
+
+  <!-- WIN LAYER -->
+  <img id="gameWinImg" class="win-img" src="gamewin.svg" alt="Game win">
+  <img id="matchWinImg" class="win-img" src="matchwin.svg" alt="Match win">
+  <img id="matchOverImg" class="win-img match-over-img" src="matchover.svg" alt="Match over">
+  <!-- <div id="winnerText" class="win-text">PLAYER WINS!</div> -->
+
+  </div>
+
+  <div class="scene scene-meta" data-scene="meta">
+    <div class="meta-scene">
+      <div class="meta-header">
+        <div id="metaTitle" class="meta-title">META BREAKDOWN</div>
+        <div id="metaSubtitle" class="meta-subtitle">DAY 1 - TOP 64</div>
+        <div id="metaYear" class="meta-year">2026 NM</div>
+      </div>
+      <div class="meta-grid">
+        <div class="meta-table">
+          <div class="meta-table-head">
+            <div>ARCHETYPE</div>
+            <div>ANTALL DECK</div>
+            <div>ANDEL%</div>
+            <div>NØKKELKORT</div>
+          </div>
+          <div id="metaLeftRows" class="meta-rows"></div>
+        </div>
+        <div class="meta-table">
+          <div class="meta-table-head">
+            <div>ARCHETYPE</div>
+            <div>ANTALL DECK</div>
+            <div>ANDEL%</div>
+            <div>NØKKELKORT</div>
+          </div>
+          <div id="metaRightRows" class="meta-rows"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<img class="bottom-bar-image" src="bottomBarScroller.png" alt="">
+<div class="bottom-bar-ticker">
+    <div id="bottomBarTickerTrack" class="bottom-bar-ticker-track"></div>
+  </div>
+</div>
+
+<script src="theme-loader.js"></script>
+<script src="win-overlay.js"></script>
+<script src="meta-scene.js"></script>
+<script src="script.js"></script>
+
+<script>
+  // Skalerer det faste 1920x1080-designet ned/opp til a fylle det
+  // faktiske vinduet/OBS Browser Source-storrelsen (f.eks. 3840x2160),
+  // med riktig bilde-proporsjon bevart og sentrert.
+  (function () {
+    const overlay = document.querySelector(".overlay");
+    if (!overlay) return;
+
+    function scaleOverlay() {
+      const scaleX = window.innerWidth / 1920;
+      const scaleY = window.innerHeight / 1080;
+      const scale = Math.min(scaleX, scaleY);
+      overlay.style.transform = "scale(" + scale + ")";
+    }
+
+    window.addEventListener("resize", scaleOverlay);
+    scaleOverlay();
+  })();
+</script>
+
+<script>
+    // Rullende tekst nederst - hentet fra desktop-appen sin lokale
+    // /api/settings/stream-content (satt via Stream-fanen i appen),
+    // i stedet for den gamle Apps Script-baserte JSONP-hentingen.
+    (function () {
+      const POLL_MS = 5000;
+      let lastTickerText = null;
+
+      function updateTicker(text) {
+        const track = document.getElementById("bottomBarTickerTrack");
+        if (!track || text === lastTickerText) return;
+        lastTickerText = text;
+
+        const repeated = Array(10).fill(text).map(function (t) {
+          return "<span>" + t + "</span>";
+        }).join("");
+        track.innerHTML = repeated + repeated;
+      }
+
+      async function updateBottomBarTicker() {
+        try {
+          const res = await fetch("http://localhost:4848/api/settings/stream-content", { cache: "no-store" });
+          if (!res.ok) return;
+          const data = await res.json();
+          const tickerText = String(data?.tickerText || "").trim() || "SCROLLING INFO >>>>>";
+          updateTicker(tickerText);
+        } catch (err) {
+          console.error("[BOTTOM-BAR-TICKER]", err);
+        }
+      }
+
+      updateBottomBarTicker();
+      setInterval(updateBottomBarTicker, POLL_MS);
+    })();
+  </script>
+</body>
+</html>

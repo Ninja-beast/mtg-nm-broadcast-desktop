@@ -5,6 +5,7 @@ exports.excludePlayerFromMeleeSync = excludePlayerFromMeleeSync;
 exports.syncMeleeStandings = syncMeleeStandings;
 exports.syncMeleeCurrentMatches = syncMeleeCurrentMatches;
 exports.syncMeleeBracket = syncMeleeBracket;
+exports.syncMeleeDeckCards = syncMeleeDeckCards;
 exports.getMeleeMetaBreakdown = getMeleeMetaBreakdown;
 exports.syncMeleeAll = syncMeleeAll;
 exports.startMeleeAutoSync = startMeleeAutoSync;
@@ -219,16 +220,35 @@ async function syncMeleeCurrentMatches(tournamentId, meleeTournamentId) {
         if (deck2)
             upsertDeck(player2Id, extractArchetype(deck2), deck2.DecklistName || "", String(deck2.DecklistId ?? ""));
         const tableNumber = match.TableNumber ?? null;
-        // Finner eksisterende BO3-match for dette bordet i denne turneringen
-        // for a oppdatere i stedet for a lage en duplikat rad hver sync.
-        const existing = db_1.db
-            .prepare(`SELECT id FROM matches WHERE tournament_id = ? AND table_number = ? AND status = 'in_progress' ORDER BY id DESC LIMIT 1`)
-            .get(tournamentId, tableNumber);
+        const meleeMatchId = String(match.ID ?? match.Id ?? match.MatchId ?? "");
+        // Melee sitt eget rapporterte resultat for denne kampen (GameWins
+        // per side - samme felt som allerede brukes for sluttspill-braketten
+        // i syncMeleeBracket under). Kan vaere fravaerende (ingen resultat
+        // rapportert enna) - da lar vi kolonnene sta NULL i stedet for a
+        // anta 0-0, sa "PENDING_SYNC" kan skilles fra et ekte 0-0-resultat.
+        const meleeP1GameWinsRaw = c1?.GameWins;
+        const meleeP2GameWinsRaw = c2?.GameWins;
+        const hasMeleeResult = meleeP1GameWinsRaw != null && meleeP2GameWinsRaw != null;
+        const meleeP1GameWins = hasMeleeResult ? Number(meleeP1GameWinsRaw) : null;
+        const meleeP2GameWins = hasMeleeResult ? Number(meleeP2GameWinsRaw) : null;
+        // Finner eksisterende match-rad for a oppdatere i stedet for a lage
+        // en duplikat rad hver sync. Matcher FORST pa den stabile Melee-
+        // match-ID-en (finnes den, er den alltid riktig - upavirket av om
+        // kampen lokalt na star som "finished"). Kun hvis vi ikke har noen
+        // meleeMatchId a matche pa (bor egentlig ikke skje), faller vi
+        // tilbake til den gamle bordnummer+status-metoden - denne fallbacken
+        // er ARSAKEN til at duplikater kunne oppsta for: en kamp markert
+        // ferdig (win-game/End Match/Enter Result) matchet ikke lenger
+        // status='in_progress', sa neste sync opprettet en helt ny rad for
+        // samme bord/spillere i stedet for a finne igjen den gamle.
+        const existing = meleeMatchId
+            ? db_1.db.prepare(`SELECT id FROM matches WHERE tournament_id = ? AND melee_match_id = ?`).get(tournamentId, meleeMatchId)
+            : db_1.db.prepare(`SELECT id FROM matches WHERE tournament_id = ? AND table_number = ? AND status = 'in_progress' ORDER BY id DESC LIMIT 1`).get(tournamentId, tableNumber);
         if (existing) {
-            db_1.db.prepare(`UPDATE matches SET player1_id = ?, player2_id = ? WHERE id = ?`).run(player1Id, player2Id, existing.id);
+            db_1.db.prepare(`UPDATE matches SET player1_id = ?, player2_id = ?, table_number = ?, melee_match_id = ?, melee_player1_game_wins = ?, melee_player2_game_wins = ?, melee_result_synced_at = datetime('now') WHERE id = ?`).run(player1Id, player2Id, tableNumber, meleeMatchId, meleeP1GameWins, meleeP2GameWins, existing.id);
         }
         else {
-            db_1.db.prepare(`INSERT INTO matches (tournament_id, player1_id, player2_id, table_number) VALUES (?, ?, ?, ?)`).run(tournamentId, player1Id, player2Id, tableNumber);
+            db_1.db.prepare(`INSERT INTO matches (tournament_id, player1_id, player2_id, table_number, melee_match_id, melee_player1_game_wins, melee_player2_game_wins, melee_result_synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`).run(tournamentId, player1Id, player2Id, tableNumber, meleeMatchId, meleeP1GameWins, meleeP2GameWins);
         }
         written += 1;
     }
@@ -236,6 +256,7 @@ async function syncMeleeCurrentMatches(tournamentId, meleeTournamentId) {
 }
 function logSyncResult(ok, message) {
     db_1.db.prepare(`INSERT INTO melee_sync_log (ok, message) VALUES (?, ?)`).run(ok ? 1 : 0, message);
+    (0, db_1.appLog)(ok ? "info" : "warn", `[Melee] ${message}`);
 }
 /**
  * Klassifiserer en runde-beskrivelse fra Melee til quarter/semi/final -
@@ -288,6 +309,68 @@ async function syncMeleeBracket(tournamentId, meleeTournamentId) {
 const GENERIC_META_NAMES = ["decklist", "deck list", "untitled", "unnamed"];
 function isGenericMetaName(name) {
     return GENERIC_META_NAMES.includes(String(name || "").trim().toLowerCase());
+}
+// Samme liste som det gamle fetchMeleeDecklistCardsByGuid_ i
+// MeleeSync.gs brukte - grunnkort er ikke interessante a vise som
+// "showcase"-kort, sa de filtreres bort her ogsa.
+const BASIC_LAND_NAMES = ["plains", "island", "swamp", "mountain", "forest", "wastes"];
+/**
+ * Fyller deck_cards-tabellen med den FAKTISKE kortlisten per spiller,
+ * hentet fra SAMME /api/decklist/list/{id}-kall som allerede brukes
+ * for meta breakdown over - Melee sender kortlisten i et
+ * "Records"-array pa hver decklist-oppforing ({n: kortnavn, c:
+ * kategori - 99 = sideboard}), bare at koden over kun har lest
+ * DecklistName/Attributes fra samme respons til na (bekreftet fra det
+ * gamle fetchMeleeDecklistCardsByGuid_ i MeleeSync.gs, som gjorde
+ * noyaktig dette mot regnearket for pa samme mate).
+ *
+ * Matcher hver decklist-oppforing (entry.Guid) mot decks.melee_
+ * decklist_id, som allerede settes riktig av syncMeleeCurrentMatches
+ * over (fra Competitors[].Decklists[].DecklistId - samme verdi som
+ * Guid i praksis, bekreftet av at det gamle systemet matchet disse
+ * to feltene mot hverandre pa nettopp denne maten).
+ */
+async function syncMeleeDeckCards(tournamentId, meleeTournamentId) {
+    const decklists = await meleeGetPaged(`/api/decklist/list/${meleeTournamentId}`);
+    const decks = db_1.db
+        .prepare(`SELECT d.id, d.melee_decklist_id FROM decks d JOIN players p ON p.id = d.player_id WHERE p.tournament_id = ? AND d.melee_decklist_id != ''`)
+        .all(tournamentId);
+    const deckIdsByMeleeGuid = new Map();
+    decks.forEach((d) => {
+        const list = deckIdsByMeleeGuid.get(d.melee_decklist_id) || [];
+        list.push(d.id);
+        deckIdsByMeleeGuid.set(d.melee_decklist_id, list);
+    });
+    let written = 0;
+    for (const entry of decklists) {
+        const guid = String(entry?.Guid ?? "");
+        if (!guid)
+            continue;
+        const matchingDeckIds = deckIdsByMeleeGuid.get(guid);
+        if (!matchingDeckIds || !matchingDeckIds.length)
+            continue;
+        const records = Array.isArray(entry.Records) ? entry.Records : [];
+        const seen = new Set();
+        const cards = [];
+        records.forEach((rec) => {
+            const name = String(rec?.n ?? "").trim();
+            if (!name)
+                return;
+            if (BASIC_LAND_NAMES.includes(name.toLowerCase()))
+                return;
+            if (seen.has(name))
+                return;
+            seen.add(name);
+            cards.push({ name, isSideboard: rec?.c === 99 });
+        });
+        for (const deckId of matchingDeckIds) {
+            db_1.db.prepare(`DELETE FROM deck_cards WHERE deck_id = ?`).run(deckId);
+            const insert = db_1.db.prepare(`INSERT INTO deck_cards (deck_id, card_name, is_sideboard) VALUES (?, ?, ?)`);
+            cards.forEach((c) => insert.run(deckId, c.name, c.isSideboard ? 1 : 0));
+            written += cards.length;
+        }
+    }
+    return written;
 }
 const META_TOP_N = 10;
 let metaCache = null;
@@ -348,7 +431,13 @@ async function syncMeleeAll() {
         const standingsCount = await syncMeleeStandings(tournamentId, meleeTournamentId);
         const matchesCount = await syncMeleeCurrentMatches(tournamentId, meleeTournamentId);
         const bracketCount = await syncMeleeBracket(tournamentId, meleeTournamentId);
-        const message = `OK - ${standingsCount} standings, ${matchesCount} kamp(er), ${bracketCount} bracket-kamp(er) oppdatert.`;
+        const deckCardsCount = await syncMeleeDeckCards(tournamentId, meleeTournamentId);
+        // Automatisk opprydding etter hver synk - se dedupeMatches i
+        // server/db.ts for de noyaktige reglene for hva som regnes som
+        // et duplikat. Kjorer stille hver gang; sier ifra i sync-loggen
+        // KUN nar den faktisk fant og fjernet noe.
+        const dedupedCount = (0, db_1.dedupeMatches)(tournamentId);
+        const message = `OK - ${standingsCount} standings, ${matchesCount} kamp(er), ${bracketCount} bracket-kamp(er), ${deckCardsCount} deck-kort oppdatert${dedupedCount > 0 ? `, ${dedupedCount} duplikat(er) fjernet` : ""}.`;
         logSyncResult(true, message);
         return { ok: true, message };
     }

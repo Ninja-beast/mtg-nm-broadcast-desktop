@@ -13,6 +13,7 @@ const node_crypto_1 = __importDefault(require("node:crypto"));
 const electron_1 = require("electron");
 const ws_1 = require("ws");
 const db_1 = require("./db");
+const auth_1 = require("./auth");
 const melee_1 = require("./melee");
 const obs_1 = require("./obs");
 /**
@@ -29,10 +30,38 @@ const obs_1 = require("./obs");
  * bare lokalt og med push i stedet for polling.
  */
 const PORT = Number(process.env.MTG_APP_PORT || 4848);
+const serverStartedAt = Date.now();
+// De 7 nokkelene med ekte overlay-HTML-sider, pluss 5 rene OBS-scener
+// uten noen tilhorende overlay-fil (f.eks. et kamera-only intervju-
+// oppsett satt opp direkte i OBS). Studio Mode/scenebytte i OBS
+// bryr seg ikke om en scene har en overlay-fil eller ikke - alle 12
+// fungerer likt for Take/Cut/Stinger, sa lenge scenenavnet (eller en
+// overstyring under Settings) matcher noe som faktisk finnes i OBS.
+const ALL_SCENE_KEYS = [
+    "bo3", "bo5", "meta", "top16", "bracket", "casterdesk", "starting",
+    "day2bracket", "placeholder", "floor", "interview", "endstream"
+];
+// Arm Intermission-nedtelling - kun i minnet (samme prinsipp som OBS-
+// tilkoblingen i obs.ts), siden den kun trenger a overleve sa lenge
+// serveren kjorer under selve sendingen. Restart av appen nullstiller
+// en eventuelt aktiv nedtelling.
+let intermissionTimer = null;
+let intermissionEndsAt = null;
+const sessions = new Map();
 function startServer() {
     const app = (0, express_1.default)();
     app.use((0, cors_1.default)());
     app.use(express_1.default.json({ limit: "25mb" }));
+    // Hindrer nettleseren (og evt. mellomledd) i a cache GET-svar fra
+    // API-et - uten dette kan en vanlig F5-oppdatering vise et gammelt,
+    // cachet JSON-svar i stedet for et ferskt fra serveren, selv om
+    // verdien faktisk har endret seg pa server-siden. Statiske overlay-
+    // filer under /overlay er IKKE rammet av dette (de settes opp
+    // separat under, med sin egen express.static).
+    app.use("/api", (_req, res, next) => {
+        res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+        next();
+    });
     // __dirname her peker pa dist-electron/server (kompilert output).
     // I dev-modus (npm run dev) er to nivaer opp derfra prosjektroten,
     // hvor selve overlay/-mappen ligger (den kompileres ikke av tsc,
@@ -44,6 +73,107 @@ function startServer() {
         ? node_path_1.default.join(process.resourcesPath, "overlay")
         : node_path_1.default.join(__dirname, "..", "..", "overlay");
     app.use("/overlay", express_1.default.static(overlayPath));
+    // ---- Innlogging / brukerkontoer ----
+    function requireAuth(req, res, next) {
+        const token = String(req.headers["x-auth-token"] ?? "");
+        const session = sessions.get(token);
+        if (!session)
+            return res.status(401).json({ error: "Ikke innlogget" });
+        req.session = session;
+        next();
+    }
+    function requireAdmin(req, res, next) {
+        const session = req.session;
+        if (!session || !session.roles.includes("ADMINISTRATOR")) {
+            return res.status(403).json({ error: "Krever administrator-rolle" });
+        }
+        next();
+    }
+    app.get("/api/auth/bootstrap-status", (_req, res) => {
+        const userCount = db_1.db.prepare(`SELECT COUNT(*) as n FROM users`).get().n;
+        res.json({ hasUsers: userCount > 0 });
+    });
+    app.post("/api/auth/login", (req, res) => {
+        const { username, password } = req.body ?? {};
+        const user = db_1.db.prepare(`SELECT * FROM users WHERE username = ?`).get(String(username ?? ""));
+        if (!user || !(0, auth_1.verifyPassword)(String(password ?? ""), user.password_hash)) {
+            return res.status(401).json({ error: "Feil brukernavn eller passord" });
+        }
+        const token = node_crypto_1.default.randomBytes(24).toString("hex");
+        const roles = (0, db_1.getUserRoles)(user.id);
+        sessions.set(token, { userId: user.id, username: user.username, roles });
+        res.json({ token, username: user.username, roles });
+    });
+    app.post("/api/auth/logout", (req, res) => {
+        const { token } = req.body ?? {};
+        sessions.delete(String(token ?? ""));
+        res.json({ ok: true });
+    });
+    app.get("/api/auth/me", requireAuth, (req, res) => {
+        res.json(req.session);
+    });
+    // Brukerstyring (Users & Access-siden). Unntak: hvis det IKKE finnes
+    // noen brukere enna (forste gang appen tas i bruk), tillates aa
+    // opprette den aller forste kontoen uten innlogging - ellers ville
+    // ingen kunne logge inn i det hele tatt (hona-og-egget-problem).
+    function requireAuthOrBootstrap(req, res, next) {
+        const userCount = db_1.db.prepare(`SELECT COUNT(*) as n FROM users`).get().n;
+        if (userCount === 0)
+            return next();
+        return requireAuth(req, res, next);
+    }
+    app.get("/api/users", requireAuth, (_req, res) => {
+        const rows = db_1.db.prepare(`SELECT id, username, role, created_at FROM users ORDER BY username`).all();
+        const withRoles = rows.map((u) => ({ ...u, roles: (0, db_1.getUserRoles)(u.id) }));
+        res.json(withRoles);
+    });
+    app.post("/api/users", requireAuthOrBootstrap, (req, res) => {
+        const { username, password, role, roles } = req.body ?? {};
+        if (!username || !password)
+            return res.status(400).json({ error: "username og password er pakrevd" });
+        // Godtar bade det gamle "role" (enkelt streng) og det nye "roles"
+        // (liste) - forste gang appen tas i bruk (bootstrap) sender
+        // LoginScreen fortsatt roles: ["ADMINISTRATOR"], men gamle/eksterne
+        // kall med kun "role" skal ikke plutselig knekke.
+        const roleList = Array.isArray(roles) && roles.length > 0 ? roles : [String(role ?? "EVENT")];
+        try {
+            const info = db_1.db
+                .prepare(`INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)`)
+                .run(String(username), (0, auth_1.hashPassword)(String(password)), roleList[0]);
+            (0, db_1.setUserRoles)(Number(info.lastInsertRowid), roleList);
+            res.json({ id: info.lastInsertRowid });
+        }
+        catch (err) {
+            res.status(400).json({ error: "Brukernavnet er allerede i bruk" });
+        }
+    });
+    app.delete("/api/users/:id", requireAuth, requireAdmin, (req, res) => {
+        db_1.db.prepare(`DELETE FROM users WHERE id = ?`).run(Number(req.params.id));
+        res.json({ ok: true });
+    });
+    // Erstatter HELE rollesettet for kontoen (se setUserRoles i
+    // server/db.ts) - UI-et sender alltid det komplette onskede settet,
+    // ikke en enkelt legg-til/fjern-endring.
+    app.patch("/api/users/:id/roles", requireAuth, requireAdmin, (req, res) => {
+        const { roles } = req.body ?? {};
+        if (!Array.isArray(roles) || roles.length === 0) {
+            return res.status(400).json({ error: "roles ma vaere en liste med minst en rolle" });
+        }
+        try {
+            (0, db_1.setUserRoles)(Number(req.params.id), roles.map(String));
+            res.json({ ok: true });
+        }
+        catch (err) {
+            res.status(400).json({ error: err?.message || String(err) });
+        }
+    });
+    app.patch("/api/users/:id/password", requireAuth, requireAdmin, (req, res) => {
+        const { password } = req.body ?? {};
+        if (!password)
+            return res.status(400).json({ error: "password er pakrevd" });
+        db_1.db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run((0, auth_1.hashPassword)(String(password)), Number(req.params.id));
+        res.json({ ok: true });
+    });
     // MIDLERTIDIG DIAGNOSE-ENDEPUNKT - fjernes igjen nar overlay-stien er
     // bekreftet riktig. Viser noyaktig hvilken sti serveren regner ut,
     // om mappen finnes der, og hva som faktisk ligger i den (hvis noe).
@@ -70,7 +200,44 @@ function startServer() {
         });
     });
     const server = node_http_1.default.createServer(app);
-    const wss = new ws_1.WebSocketServer({ server, path: "/ws" });
+    // VIKTIG: noServer:true + manuell "upgrade"-ruting under, i stedet
+    // for a la begge WebSocketServer-instansene feste seg direkte til
+    // "server" med hver sin "path"-innstilling. Nar flere ws-instanser
+    // deler samme HTTP-server via automatisk path-matching, kan begge
+    // i sjeldne tilfeller forsoke a handtere samme upgrade-forsporsel -
+    // noe som odelegger selve WebSocket-handshaken/rammingen (viste seg
+    // som "Invalid frame header" og en tilkobling som stadig ryker og
+    // kobler til pa nytt). Eksplisitt ruting her garanterer at KUN riktig
+    // server noensinne handterer en gitt tilkobling.
+    const wss = new ws_1.WebSocketServer({ noServer: true });
+    const adminWss = new ws_1.WebSocketServer({ noServer: true });
+    server.on("upgrade", (request, socket, head) => {
+        const { pathname } = new URL(request.url || "", "http://localhost");
+        if (pathname === "/ws") {
+            wss.handleUpgrade(request, socket, head, (ws) => {
+                wss.emit("connection", ws, request);
+            });
+        }
+        else if (pathname === "/ws-admin") {
+            adminWss.handleUpgrade(request, socket, head, (ws) => {
+                adminWss.emit("connection", ws, request);
+            });
+        }
+        else {
+            socket.destroy();
+        }
+    });
+    // Egen WebSocket-server KUN for Observer-appen selv (host/klient-
+    // instanser) - helt atskilt fra "wss" over, som er overlayenes
+    // (BO3.html/BO5.html osv.) tilkobling. Grunnen til at de ma vaere
+    // to forskjellige: hver overlay-scene i OBS holder sin egen "wss"-
+    // tilkobling apen i bakgrunnen (selv nar scenen ikke er synlig pa
+    // streamen), sa CLIENTS-tallet i toppbaren viste antall overlay-
+    // kilder i stedet for antall faktiske personer/enheter som
+    // fjernstyrer appen. adminWss teller KUN det siste.
+    adminWss.on("connection", (ws) => {
+        ws.on("error", () => { });
+    });
     function broadcast(payload) {
         const json = JSON.stringify(payload);
         wss.clients.forEach((client) => {
@@ -180,7 +347,9 @@ function startServer() {
                 quarter: loadBracketRound("quarter"),
                 semi: loadBracketRound("semi"),
                 final: loadBracketRound("final")
-            }
+            },
+            cardShowcaseVisible: (0, db_1.getSetting)("card_showcase_visible") !== "off",
+            showNameTags: (0, db_1.getSetting)("show_name_tags") !== "off"
         };
     }
     function pushBroadcastUpdate() {
@@ -490,19 +659,22 @@ function startServer() {
     // (connectObs, saveObsSettings osv.), men var aldri koblet opp mot
     // Express her, sa "Koble til OBS"-knappen i UI-et kalte et endepunkt
     // som ikke fantes (404) og feilet stille.
-    const sceneKeys = ["bo3", "bo5", "meta", "top16", "bracket", "casterdesk", "starting"];
+    const sceneKeys = ALL_SCENE_KEYS;
     app.get("/api/settings/obs", async (_req, res) => {
         const status = (0, obs_1.getObsStatus)();
         const scenes = await (0, obs_1.listObsScenes)();
         res.json({
             ...status,
             scenes,
-            sceneNameOverrides: (0, obs_1.getObsSceneNameOverrides)(sceneKeys)
+            sceneNameOverrides: (0, obs_1.getObsSceneNameOverrides)(sceneKeys),
+            placeholderScene: (0, db_1.getSetting)("obs_placeholder_scene") || "Placeholder"
         });
     });
     app.post("/api/settings/obs", (req, res) => {
-        const { host, port, password } = req.body ?? {};
+        const { host, port, password, placeholderScene } = req.body ?? {};
         (0, obs_1.saveObsSettings)(String(host ?? "localhost"), String(port ?? "4455"), String(password ?? ""));
+        if (placeholderScene != null)
+            (0, obs_1.saveObsPlaceholderScene)(String(placeholderScene));
         res.json({ ok: true });
     });
     app.post("/api/settings/obs/connect", async (_req, res) => {
@@ -548,10 +720,19 @@ function startServer() {
             .run(String(name), String(format ?? ""), Number(totalRounds ?? 0));
         res.json({ id: info.lastInsertRowid });
     });
+    // Delvis oppdatering - kun feltene som faktisk sendes med blir
+    // endret (eksisterende verdi beholdes ellers). Utvidet med
+    // currentRound/phase for "EDIT ROUND"/"ADVANCE STAGE" i Tournament-
+    // fanen (Fallback Control) - tidligere overskrev denne ALLTID alle
+    // tre feltene (name/format/totalRounds), selv nar de ikke ble sendt
+    // med, noe som kunne nullstille dem ved en feil.
     app.patch("/api/tournament/:id", (req, res) => {
         const id = Number(req.params.id);
-        const { name, format, totalRounds } = req.body ?? {};
-        db_1.db.prepare(`UPDATE tournaments SET name = ?, format = ?, total_rounds = ? WHERE id = ?`).run(String(name ?? ""), String(format ?? ""), Number(totalRounds ?? 0), id);
+        const existing = db_1.db.prepare(`SELECT * FROM tournaments WHERE id = ?`).get(id);
+        if (!existing)
+            return res.status(404).json({ error: "turnering ikke funnet" });
+        const { name, format, totalRounds, currentRound, phase } = req.body ?? {};
+        db_1.db.prepare(`UPDATE tournaments SET name = ?, format = ?, total_rounds = ?, current_round = ?, phase = ? WHERE id = ?`).run(name != null ? String(name) : existing.name, format != null ? String(format) : existing.format, totalRounds != null ? Number(totalRounds) : existing.total_rounds, currentRound != null ? Number(currentRound) : existing.current_round, phase != null ? String(phase) : existing.phase, id);
         res.json({ ok: true });
     });
     app.delete("/api/tournament/:id", (req, res) => {
@@ -597,6 +778,16 @@ function startServer() {
         const rows = db_1.db.prepare(`SELECT * FROM players WHERE tournament_id = ? ORDER BY name`).all(tournamentId);
         res.json(rows);
     });
+    // Full standings-liste (wins/losses/draws per spiller) for aktiv
+    // turnering - brukes av Judge Workspace sitt RECORD-felt. De
+    // eksisterende standings-uttrekkene andre steder (CasterDesk/
+    // StreamWidget/broadcast-payload) er begrenset til topp 16 og
+    // formatert som streng - dette er full liste, radata.
+    app.get("/api/standings", (req, res) => {
+        const tournamentId = Number(req.query.tournamentId ?? (0, db_1.getActiveTournamentId)());
+        const rows = db_1.db.prepare(`SELECT player_id, rank, wins, losses, draws FROM standings WHERE tournament_id = ?`).all(tournamentId);
+        res.json(rows);
+    });
     app.post("/api/players", (req, res) => {
         const { tournamentId, name, flagCode } = req.body ?? {};
         if (!tournamentId || !name)
@@ -638,6 +829,110 @@ function startServer() {
         res.json({ ok: true });
     });
     // ---- Matches ----
+    // ---- CSV-import (motstykket til Export CSV pa validerings-siden) ----
+    // Samme kolonneformat som selve eksporten lager: Table,Player1,
+    // Player2,LocalResult,MeleeResult,Status,RoundLabel - MeleeResult og
+    // Status ignoreres ved import (de er utledet/kommer fra Melee-synk,
+    // aldri noe man skal skrive inn manuelt). Finner eksisterende
+    // spillere pa navn (case-ufolsomt) i stedet for a lage duplikater,
+    // og oppdaterer en eksisterende kamp pa samme bord+spillere hvis en
+    // slik allerede finnes, i stedet for a alltid lage en ny.
+    app.post("/api/tournament/:id/import-csv", (req, res) => {
+        const tournamentId = Number(req.params.id);
+        const { csv } = req.body ?? {};
+        if (!csv || typeof csv !== "string")
+            return res.status(400).json({ error: "csv (tekst) er pakrevd" });
+        const tournament = db_1.db.prepare(`SELECT id FROM tournaments WHERE id = ?`).get(tournamentId);
+        if (!tournament)
+            return res.status(404).json({ error: "turnering ikke funnet" });
+        function findOrCreatePlayer(name) {
+            const trimmed = name.trim();
+            const existing = db_1.db
+                .prepare(`SELECT id FROM players WHERE tournament_id = ? AND LOWER(name) = LOWER(?)`)
+                .get(tournamentId, trimmed);
+            if (existing)
+                return existing.id;
+            const info = db_1.db.prepare(`INSERT INTO players (tournament_id, name) VALUES (?, ?)`).run(tournamentId, trimmed);
+            playersCreated += 1;
+            return Number(info.lastInsertRowid);
+        }
+        const lines = csv.split(/\r?\n/).filter((line) => line.trim() !== "");
+        if (lines.length < 2)
+            return res.status(400).json({ error: "CSV-en har ingen datarader (kun header, eller tom)" });
+        const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
+        const col = (name) => header.indexOf(name);
+        const tableCol = col("table");
+        const p1Col = col("player1");
+        const p2Col = col("player2");
+        const resultCol = col("localresult");
+        const roundCol = col("roundlabel");
+        if (p1Col === -1 || p2Col === -1) {
+            return res.status(400).json({ error: 'CSV-header ma inneholde minst "Player1" og "Player2"' });
+        }
+        let playersCreated = 0;
+        let matchesCreated = 0;
+        let matchesUpdated = 0;
+        const errors = [];
+        for (let i = 1; i < lines.length; i += 1) {
+            const cells = lines[i].split(",");
+            const p1Name = cells[p1Col]?.trim();
+            const p2Name = cells[p2Col]?.trim();
+            const tableNumber = tableCol !== -1 ? Number(cells[tableCol]) || null : null;
+            const roundLabel = roundCol !== -1 ? (cells[roundCol] || "").trim() : "";
+            const resultRaw = resultCol !== -1 ? (cells[resultCol] || "").trim() : "";
+            if (!p1Name || !p2Name) {
+                errors.push(`Rad ${i + 1}: mangler Player1 eller Player2`);
+                continue;
+            }
+            let player1GameWins = null;
+            let player2GameWins = null;
+            if (resultRaw) {
+                const parts = resultRaw.split("-").map((n) => Number(n.trim()));
+                if (parts.length === 2 && parts.every((n) => Number.isFinite(n))) {
+                    [player1GameWins, player2GameWins] = parts;
+                }
+                else {
+                    errors.push(`Rad ${i + 1}: klarte ikke tolke resultatet "${resultRaw}" (forventet format "2-1")`);
+                }
+            }
+            const player1Id = findOrCreatePlayer(p1Name);
+            const player2Id = findOrCreatePlayer(p2Name);
+            const existingMatch = db_1.db
+                .prepare(`SELECT id FROM matches WHERE tournament_id = ? AND ((player1_id = ? AND player2_id = ?) OR (player1_id = ? AND player2_id = ?)) ORDER BY id DESC LIMIT 1`)
+                .get(tournamentId, player1Id, player2Id, player2Id, player1Id);
+            if (existingMatch) {
+                const updates = [];
+                const params = [];
+                if (tableNumber != null) {
+                    updates.push("table_number = ?");
+                    params.push(tableNumber);
+                }
+                if (roundLabel) {
+                    updates.push("round_label = ?");
+                    params.push(roundLabel);
+                }
+                if (player1GameWins != null && player2GameWins != null) {
+                    updates.push("player1_game_wins = ?, player2_game_wins = ?, status = 'finished'");
+                    params.push(player1GameWins, player2GameWins);
+                }
+                if (updates.length > 0) {
+                    params.push(existingMatch.id);
+                    db_1.db.prepare(`UPDATE matches SET ${updates.join(", ")} WHERE id = ?`).run(...params);
+                    matchesUpdated += 1;
+                }
+            }
+            else {
+                const info = db_1.db
+                    .prepare(`INSERT INTO matches (tournament_id, player1_id, player2_id, table_number, round_label, player1_game_wins, player2_game_wins, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+                    .run(tournamentId, player1Id, player2Id, tableNumber, roundLabel, player1GameWins ?? 0, player2GameWins ?? 0, player1GameWins != null ? "finished" : "in_progress");
+                if (info.lastInsertRowid)
+                    matchesCreated += 1;
+            }
+        }
+        pushBroadcastUpdate();
+        res.json({ ok: true, playersCreated, matchesCreated, matchesUpdated, errors });
+    });
     app.get("/api/matches", (req, res) => {
         const tournamentId = Number(req.query.tournamentId ?? (0, db_1.getActiveTournamentId)());
         const rows = db_1.db.prepare(`SELECT * FROM matches WHERE tournament_id = ? ORDER BY id DESC`).all(tournamentId);
@@ -673,7 +968,9 @@ function startServer() {
             format: "format",
             roundLabel: "round_label",
             player1CardShowcase: "player1_card_showcase",
-            player2CardShowcase: "player2_card_showcase"
+            player2CardShowcase: "player2_card_showcase",
+            player1LifeOverride: "player1_life_override",
+            player2LifeOverride: "player2_life_override"
         };
         const setClauses = [];
         const values = [];
@@ -683,12 +980,113 @@ function startServer() {
                 values.push(fields[key]);
             }
         }
+        // Enhver manuell liv-endring fra Kampkontroll-siden markeres
+        // automatisk som "override" (LIFE OVERRIDE-merket) - operatoren
+        // trenger ikke sette dette selv, det folger av a bruke -5/-1/+1/+5/
+        // SET.. eller Reset 20-knappene.
+        if ("player1Life" in fields && !("player1LifeOverride" in fields)) {
+            setClauses.push("player1_life_override = 1");
+        }
+        if ("player2Life" in fields && !("player2LifeOverride" in fields)) {
+            setClauses.push("player2_life_override = 1");
+        }
         if (!setClauses.length)
             return res.status(400).json({ error: "ingen gyldige felt sendt" });
+        setClauses.push("updated_at = datetime('now')");
         values.push(id);
         db_1.db.prepare(`UPDATE matches SET ${setClauses.join(", ")} WHERE id = ?`).run(...values);
         pushBroadcastUpdate();
         res.json({ ok: true });
+    });
+    // ---- Judge Workspace: notater, advarsler og korrigeringer ----
+    // GET er apen (samme monster som resten av API-et) - POST krever
+    // innlogging siden meldingen skal logges med RIKTIG dommer (server-
+    // sesjonen), ikke et brukernavn klienten selv kunne ha sendt inn.
+    app.get("/api/judge/entries", (req, res) => {
+        const tournamentId = Number(req.query.tournamentId ?? (0, db_1.getActiveTournamentId)());
+        const matchId = req.query.matchId != null ? Number(req.query.matchId) : null;
+        const rows = matchId
+            ? db_1.db.prepare(`SELECT * FROM judge_entries WHERE tournament_id = ? AND match_id = ? ORDER BY id DESC`).all(tournamentId, matchId)
+            : db_1.db.prepare(`SELECT * FROM judge_entries WHERE tournament_id = ? ORDER BY id DESC`).all(tournamentId);
+        res.json(rows);
+    });
+    // Bekrefter en resultat-uoverensstemmelse som gjennomgatt og
+    // beholder det LOKALE resultatet - i motsetning til "apply Melee's
+    // result" over, som overskriver. Lagrer hvilke Melee-tall som ble
+    // avvist (se kommentar i server/db.ts) sa en senere ENDRING i Melee
+    // sitt tall automatisk vises som en NY konflikt i stedet for a
+    // forbli stille skjult bak den gamle bekreftelsen.
+    app.post("/api/matches/:id/acknowledge-conflict", requireAuth, (req, res) => {
+        const session = req.session;
+        const id = Number(req.params.id);
+        const { reason } = req.body ?? {};
+        const match = db_1.db.prepare(`SELECT * FROM matches WHERE id = ?`).get(id);
+        if (!match)
+            return res.status(404).json({ error: "kamp ikke funnet" });
+        if (match.melee_player1_game_wins == null || match.melee_player2_game_wins == null) {
+            return res.status(400).json({ error: "Melee har ikke rapportert noe resultat for denne kampen enna" });
+        }
+        db_1.db.prepare(`UPDATE matches SET conflict_ack_melee_p1 = ?, conflict_ack_melee_p2 = ?, conflict_ack_at = datetime('now'), conflict_ack_by = ?, updated_at = datetime('now') WHERE id = ?`).run(match.melee_player1_game_wins, match.melee_player2_game_wins, session.username, id);
+        db_1.db.prepare(`INSERT INTO judge_entries (tournament_id, match_id, type, message, judge_username) VALUES (?, ?, 'correction', ?, ?)`).run(match.tournament_id, id, `Kept local result (${match.player1_game_wins}-${match.player2_game_wins}) despite Melee reporting ${match.melee_player1_game_wins}-${match.melee_player2_game_wins}.` +
+            (reason ? ` Reason: ${String(reason)}` : ""), session.username);
+        res.json({ ok: true });
+    });
+    app.post("/api/judge/entries", requireAuth, (req, res) => {
+        const session = req.session;
+        const { tournamentId, matchId, type, message } = req.body ?? {};
+        const resolvedTournamentId = Number(tournamentId ?? (0, db_1.getActiveTournamentId)());
+        if (!resolvedTournamentId)
+            return res.status(400).json({ error: "ingen aktiv turnering" });
+        const info = db_1.db
+            .prepare(`INSERT INTO judge_entries (tournament_id, match_id, type, message, judge_username) VALUES (?, ?, ?, ?, ?)`)
+            .run(resolvedTournamentId, matchId ?? null, String(type || "note"), String(message ?? ""), session.username);
+        res.json({ id: info.lastInsertRowid });
+    });
+    // Sletter en kamp-rad (opprydding etter duplikater fra fore
+    // melee_match_id-fiksen, eller en kamp opprettet ved en feil). Kobler
+    // ogsa vekk raden fra broadcast_state hvis den star pa lufta na, slik
+    // at en overlay ikke blir staende og peke pa en match-id som ikke
+    // lenger finnes.
+    app.delete("/api/matches/:id", (req, res) => {
+        const id = Number(req.params.id);
+        db_1.db.prepare(`UPDATE broadcast_state SET bo3_match_id = NULL WHERE id = 1 AND bo3_match_id = ?`).run(id);
+        db_1.db.prepare(`UPDATE broadcast_state SET bo5_match_id = NULL WHERE id = 1 AND bo5_match_id = ?`).run(id);
+        db_1.db.prepare(`DELETE FROM matches WHERE id = ?`).run(id);
+        pushBroadcastUpdate();
+        res.json({ ok: true });
+    });
+    // Bytter plass pa de to spillerne (navn/liv/score/kort-showcase
+    // flyttes med) - selve bordet/kampen forblir den samme raden i
+    // databasen, kun player1/player2-sidene sitt innhold speilvendes.
+    app.post("/api/matches/:id/swap-sides", (req, res) => {
+        const id = Number(req.params.id);
+        const match = db_1.db.prepare(`SELECT * FROM matches WHERE id = ?`).get(id);
+        if (!match)
+            return res.status(404).json({ error: "kamp ikke funnet" });
+        db_1.db.prepare(`UPDATE matches SET
+         player1_id = ?, player2_id = ?,
+         player1_life = ?, player2_life = ?,
+         player1_game_wins = ?, player2_game_wins = ?,
+         player1_card_showcase = ?, player2_card_showcase = ?,
+         player1_life_override = ?, player2_life_override = ?,
+         updated_at = datetime('now')
+       WHERE id = ?`).run(match.player2_id, match.player1_id, match.player2_life, match.player1_life, match.player2_game_wins, match.player1_game_wins, match.player2_card_showcase, match.player1_card_showcase, match.player2_life_override, match.player1_life_override, id);
+        pushBroadcastUpdate();
+        res.json({ ok: true });
+    });
+    // Henter alle kort i spillerens NAVAERENDE registrerte deck (nyeste
+    // decks-rad) - brukes av kort-showcase-soket i Kampkontroll, slik at
+    // man kun kan velge kort spilleren faktisk har i decket sitt, ikke
+    // et hvilket som helst Magic-kort.
+    app.get("/api/players/:id/deck-cards", (req, res) => {
+        const playerId = Number(req.params.id);
+        const deck = db_1.db.prepare(`SELECT id FROM decks WHERE player_id = ? ORDER BY id DESC LIMIT 1`).get(playerId);
+        if (!deck)
+            return res.json([]);
+        const rows = db_1.db
+            .prepare(`SELECT card_name, image_url, is_sideboard FROM deck_cards WHERE deck_id = ? GROUP BY card_name ORDER BY card_name`)
+            .all(deck.id);
+        res.json(rows);
     });
     app.post("/api/matches/:id/win-game", (req, res) => {
         const id = Number(req.params.id);
@@ -720,7 +1118,7 @@ function startServer() {
         // event_id teller opp for hver hendelse - overlayets vinner-
         // animasjon (script.js/bo5-overlay.js) spiller KUN av nar denne
         // faktisk endrer seg siden forrige melding.
-        db_1.db.prepare(`UPDATE matches SET event_id = event_id + 1, event_type = ?, event_player = ? WHERE id = ?`).run(eventType, player, id);
+        db_1.db.prepare(`UPDATE matches SET event_id = event_id + 1, event_type = ?, event_player = ?, updated_at = datetime('now') WHERE id = ?`).run(eventType, player, id);
         pushBroadcastUpdate();
         res.json({ ok: true, matchWon });
     });
@@ -768,6 +1166,500 @@ function startServer() {
     });
     app.get("/api/broadcast/state", (_req, res) => {
         res.json(buildBroadcastPayload());
+    });
+    // ---- System-status (Observer-dashbordet) ----
+    // Enkel timeout-hjelper for utgaende helsesjekker (Scryfall,
+    // internett) - AbortController stopper forespoerselen etter
+    // timeoutMs i stedet for a henge til nettleseren/Node sin egen,
+    // mye lengre standard-timeout.
+    async function checkReachable(url, timeoutMs = 3000, method = "HEAD") {
+        const started = Date.now();
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(url, { method, signal: controller.signal });
+            return { ok: res.ok, ms: Date.now() - started };
+        }
+        catch {
+            return { ok: false, ms: Date.now() - started };
+        }
+        finally {
+            clearTimeout(timer);
+        }
+    }
+    // Caches helsesjekkene et par sekunder - dashbordet vil trolig polle
+    // dette ofte (samme prinsipp som resten av appen), og vi vil ikke
+    // sende en ekte nettverksforesporsel til Scryfall/internett for
+    // HVER eneste poll fra HVER eneste tilkoblet klient.
+    let lastSystemCheck = null;
+    const SYSTEM_CHECK_CACHE_MS = 5000;
+    async function getCachedHealthChecks() {
+        if (lastSystemCheck && Date.now() - lastSystemCheck.at < SYSTEM_CHECK_CACHE_MS) {
+            return lastSystemCheck;
+        }
+        const [scryfall, internet] = await Promise.all([
+            // GET, ikke HEAD - /cards/random er et dynamisk endepunkt (gir
+            // et NYTT tilfeldig kort hver gang) og svarer upalitelig pa
+            // HEAD-foresporsler selv nar Scryfall er helt oppe. Dette var
+            // arsaken til at status kunne vise "UNAVAILABLE" feilaktig.
+            checkReachable("https://api.scryfall.com/cards/random", 3000, "GET"),
+            checkReachable("https://1.1.1.1")
+        ]);
+        lastSystemCheck = { at: Date.now(), scryfall, internet };
+        return lastSystemCheck;
+    }
+    app.get("/api/system/status", async (_req, res) => {
+        const obsStatus = (0, obs_1.getObsStatus)();
+        const streamStatus = await (0, obs_1.getObsStreamStatus)();
+        const recordStatus = await (0, obs_1.getObsRecordStatus)();
+        const health = await getCachedHealthChecks();
+        const meleeEnabled = (0, db_1.getSetting)("melee_sync_enabled") !== "off";
+        const lastMeleeLog = db_1.db.prepare(`SELECT * FROM melee_sync_log ORDER BY id DESC LIMIT 1`).get();
+        // Ekte database-sjekk (ikke bare antatt) - en enkel SELECT 1 mot
+        // den samme SQLite-tilkoblingen resten av API-et bruker. Feiler
+        // denne, feiler den fanges her i stedet for a velte hele endepunktet.
+        let databaseOnline = true;
+        try {
+            db_1.db.prepare("SELECT 1").get();
+        }
+        catch {
+            databaseOnline = false;
+        }
+        res.json({
+            server: {
+                online: true,
+                uptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),
+                environment: electron_1.app.isPackaged ? "production" : "test",
+                version: electron_1.app.getVersion()
+            },
+            database: { online: databaseOnline },
+            obs: {
+                connected: obsStatus.connected,
+                lastError: obsStatus.lastError,
+                stream: streamStatus,
+                recording: recordStatus.active
+            },
+            melee: {
+                enabled: meleeEnabled,
+                lastSyncOk: lastMeleeLog ? !!lastMeleeLog.ok : null,
+                lastSyncAt: lastMeleeLog?.ran_at ?? null,
+                lastSyncMessage: lastMeleeLog?.message ?? ""
+            },
+            scryfall: { available: health.scryfall.ok, latencyMs: health.scryfall.ms },
+            internet: { online: health.internet.ok, latencyMs: health.internet.ms },
+            clients: adminWss.clients.size,
+            camera: (0, db_1.getSetting)("active_camera") || "main",
+            showNameTags: (0, db_1.getSetting)("show_name_tags") !== "off",
+            cardShowcaseVisible: (0, db_1.getSetting)("card_showcase_visible") !== "off",
+            intermissionEndsAt
+        });
+    });
+    // Beregnede varsler - ingen egen "alerts"-tabell, satt sammen live fra
+    // samme statuser som /api/system/status over, sa de to alltid er
+    // konsistente med hverandre.
+    // ---- Advanced (ekte prosess-/database-diagnostikk) ----
+    app.get("/api/system/advanced", (_req, res) => {
+        const dbPath = (0, db_1.getDbFilePath)();
+        let dbSizeBytes = 0;
+        try {
+            dbSizeBytes = node_fs_1.default.statSync(dbPath).size;
+        }
+        catch {
+            dbSizeBytes = 0;
+        }
+        res.json({
+            nodeVersion: process.versions.node,
+            electronVersion: process.versions.electron || "",
+            chromeVersion: process.versions.chrome || "",
+            dbPath,
+            dbSizeBytes,
+            wsUrl: "ws://localhost:4848/ws",
+            wsAdminUrl: "ws://localhost:4848/ws-admin"
+        });
+    });
+    // ---- Backup ----
+    app.get("/api/backup/status", (_req, res) => {
+        res.json((0, db_1.getBackupStatus)());
+    });
+    // Ekte nedlasting av en spesifikk backup-fil - matcher KUN mot
+    // filnavn som faktisk finnes i backups-mappen (via listBackups()),
+    // ikke en vilkarlig sti fra klienten, for a unnga at noen kan be om
+    // en helt annen fil pa disken via denne ruten.
+    app.get("/api/backup/download/:filename", (req, res) => {
+        const status = (0, db_1.getBackupStatus)();
+        const match = status.backups.find((b) => b.filename === req.params.filename);
+        if (!match)
+            return res.status(404).json({ error: "Fant ingen backup med det filnavnet." });
+        res.download(match.path, match.filename);
+    });
+    app.post("/api/backup/run", async (_req, res) => {
+        try {
+            const result = await (0, db_1.runBackup)();
+            (0, db_1.appLog)("info", `Backup opprettet: ${result.filename}`);
+            res.json({ ok: true, ...result });
+        }
+        catch (err) {
+            (0, db_1.appLog)("error", `Backup feilet: ${err?.message || err}`);
+            res.status(500).json({ ok: false, error: err?.message || String(err) });
+        }
+    });
+    // Skriver en valgt backup tilbake over den ekte databasen, deretter
+    // restarter appen (samme monster som save-connection-config i
+    // electron/main.ts) - den kjorende SQLite-tilkoblingen er stengt av
+    // restoreBackup() over, sa appen MA restarte for a apne den
+    // gjenopprettede filen pa nytt.
+    app.post("/api/backup/restore", requireAuth, requireAdmin, (req, res) => {
+        const { path: backupPath } = req.body ?? {};
+        if (!backupPath)
+            return res.status(400).json({ error: "path er pakrevd" });
+        try {
+            (0, db_1.appLog)("warn", `Database gjenopprettet fra backup: ${backupPath} - appen restarter.`);
+            (0, db_1.restoreBackup)(String(backupPath));
+            res.json({ ok: true });
+            setTimeout(() => {
+                electron_1.app.relaunch();
+                electron_1.app.exit(0);
+            }, 300);
+        }
+        catch (err) {
+            (0, db_1.appLog)("error", `Restore feilet: ${err?.message || err}`);
+            res.status(500).json({ ok: false, error: err?.message || String(err) });
+        }
+    });
+    // ---- Diagnostikk-logg (se appLog i server/db.ts) ----
+    app.get("/api/logs/settings", (_req, res) => {
+        res.json((0, db_1.getLogSettings)());
+    });
+    app.post("/api/logs/settings", (req, res) => {
+        const { level, retentionDays } = req.body ?? {};
+        (0, db_1.setLogSettings)(String(level || "info"), Number(retentionDays) || 14);
+        res.json({ ok: true });
+    });
+    app.get("/api/logs", (req, res) => {
+        const minLevel = String(req.query.level || "debug");
+        const limit = Math.min(Number(req.query.limit) || 200, 1000);
+        res.json((0, db_1.getLogs)(minLevel, limit));
+    });
+    app.get("/api/logs/export", (req, res) => {
+        const minLevel = String(req.query.level || "debug");
+        const rows = (0, db_1.getLogs)(minLevel, 5000);
+        const text = rows
+            .slice()
+            .reverse()
+            .map((r) => `${r.created_at} [${r.level.toUpperCase()}] ${r.message}`)
+            .join("\n");
+        res.setHeader("Content-Type", "text/plain");
+        res.setHeader("Content-Disposition", `attachment; filename="observer-log-${Date.now()}.txt"`);
+        res.send(text);
+    });
+    app.get("/api/system/alerts", async (_req, res) => {
+        const obsStatus = (0, obs_1.getObsStatus)();
+        const health = await getCachedHealthChecks();
+        const meleeEnabled = (0, db_1.getSetting)("melee_sync_enabled") !== "off";
+        const lastMeleeLog = db_1.db.prepare(`SELECT * FROM melee_sync_log ORDER BY id DESC LIMIT 1`).get();
+        const alerts = [];
+        if (meleeEnabled && lastMeleeLog && !lastMeleeLog.ok) {
+            alerts.push({
+                level: "warn",
+                title: "Melee connection unstable",
+                message: lastMeleeLog.message || "Player data cannot currently be updated. Existing broadcast data is still available."
+            });
+        }
+        if (!obsStatus.connected) {
+            alerts.push({
+                level: "warn",
+                title: "OBS not connected",
+                message: "Scene switching and stream status will not work until OBS is reconnected under Settings > Broadcast."
+            });
+        }
+        if (!health.scryfall.ok) {
+            alerts.push({
+                level: "warn",
+                title: "Scryfall API unreachable",
+                message: "Card images and key-card lookups may be unavailable until this recovers."
+            });
+        }
+        if (!health.internet.ok) {
+            alerts.push({
+                level: "error",
+                title: "No internet connection",
+                message: "Melee sync and card image lookups require internet access."
+            });
+        }
+        res.json(alerts);
+    });
+    // ---- Resterende Quick Actions (kamera, navnelapper, avslutt kamp) ----
+    // ---- OBS Studio Mode (Program/Preview - ekte to-buss-styring) ----
+    const BROADCAST_SCENE_KEYS = ALL_SCENE_KEYS;
+    function sceneNameToKey(obsSceneName) {
+        for (const key of BROADCAST_SCENE_KEYS) {
+            if ((0, obs_1.resolveObsSceneName)(key) === obsSceneName)
+                return key;
+        }
+        return "";
+    }
+    app.get("/api/obs/studio-state", async (_req, res) => {
+        const state = await (0, obs_1.getObsStudioState)();
+        res.json({
+            enabled: state.enabled,
+            program: sceneNameToKey(state.program) || state.program,
+            preview: sceneNameToKey(state.preview) || state.preview
+        });
+    });
+    // which=program|preview - henter selve scenenavnet fra na-tilstanden
+    // i OBS (ikke fra en scene-key sendt av klienten), sa bildet alltid
+    // matcher det som faktisk star i Program/Preview akkurat na.
+    app.get("/api/obs/screenshot", async (req, res) => {
+        const which = req.query.which === "preview" ? "preview" : "program";
+        const state = await (0, obs_1.getObsStudioState)();
+        const sceneName = which === "preview" ? state.preview : state.program;
+        if (!sceneName)
+            return res.json({ image: null });
+        const image = await (0, obs_1.getObsSceneScreenshot)(sceneName);
+        res.json({ image });
+    });
+    app.post("/api/obs/studio-mode/enable", async (_req, res) => {
+        const ok = await (0, obs_1.ensureStudioMode)();
+        res.json({ ok });
+    });
+    app.post("/api/obs/preview-scene", async (req, res) => {
+        const { scene } = req.body ?? {};
+        if (!scene)
+            return res.status(400).json({ error: "scene er pakrevd" });
+        const result = await (0, obs_1.setObsPreviewScene)((0, obs_1.resolveObsSceneName)(String(scene)));
+        res.json(result);
+    });
+    // TAKE/CUT/STINGER oppdaterer ogsa var egen broadcast_state.active_scene
+    // til a matche det som na faktisk star pa PROGRAM i OBS, siden resten
+    // av appen (Dashboard "SCENE", Match Control sitt aktive bord) leser
+    // scenen derfra, ikke direkte fra OBS.
+    function setActiveSceneInDb(sceneKey) {
+        db_1.db.prepare(`UPDATE broadcast_state SET active_scene = ?, updated_at = datetime('now') WHERE id = 1`).run(sceneKey);
+        pushBroadcastUpdate();
+    }
+    app.post("/api/obs/take", async (req, res) => {
+        const { scene } = req.body ?? {};
+        const result = await (0, obs_1.takeObsTransition)();
+        if (result.ok && scene)
+            setActiveSceneInDb(String(scene));
+        res.json(result);
+    });
+    app.post("/api/obs/cut", async (req, res) => {
+        const { scene } = req.body ?? {};
+        if (!scene)
+            return res.status(400).json({ error: "scene er pakrevd" });
+        const result = await (0, obs_1.cutObsScene)((0, obs_1.resolveObsSceneName)(String(scene)));
+        if (result.ok)
+            setActiveSceneInDb(String(scene));
+        res.json(result);
+    });
+    app.post("/api/obs/stinger", async (req, res) => {
+        const { scene } = req.body ?? {};
+        if (!scene)
+            return res.status(400).json({ error: "scene er pakrevd" });
+        const result = await (0, obs_1.stingerObsTransition)((0, obs_1.resolveObsSceneName)(String(scene)));
+        if (result.ok)
+            setActiveSceneInDb(String(scene));
+        res.json(result);
+    });
+    app.post("/api/obs/start-stream", async (_req, res) => {
+        const result = await (0, obs_1.startObsStream)();
+        res.json(result);
+    });
+    const phaseState = {
+        starting: { endsAt: null, status: "idle", remainingMs: 0, thenScene: "casterdesk" },
+        intermission: { endsAt: null, status: "idle", remainingMs: 0, thenScene: "casterdesk" },
+        ending: { endsAt: null, status: "idle", remainingMs: 0, thenScene: "" }
+    };
+    const phaseTimers = { starting: null, intermission: null, ending: null };
+    async function runPhaseAction(key) {
+        phaseState[key].status = "idle";
+        phaseState[key].endsAt = null;
+        if (key === "ending") {
+            await (0, obs_1.stopObsStream)();
+            return;
+        }
+        const targetKey = phaseState[key].thenScene;
+        if (targetKey) {
+            await (0, obs_1.cutObsScene)((0, obs_1.resolveObsSceneName)(targetKey));
+            setActiveSceneInDb(targetKey);
+        }
+        if (key === "starting") {
+            await (0, obs_1.startObsStream)();
+        }
+    }
+    function clearPhaseTimer(key) {
+        if (phaseTimers[key]) {
+            clearTimeout(phaseTimers[key]);
+            phaseTimers[key] = null;
+        }
+    }
+    function schedulePhaseTimer(key, ms) {
+        clearPhaseTimer(key);
+        phaseTimers[key] = setTimeout(() => {
+            runPhaseAction(key);
+        }, ms);
+    }
+    app.get("/api/broadcast/phases", (_req, res) => {
+        const now = Date.now();
+        const withRemaining = {};
+        Object.keys(phaseState).forEach((key) => {
+            const p = phaseState[key];
+            const remainingMs = p.status === "running" && p.endsAt ? Math.max(0, p.endsAt - now) : p.remainingMs;
+            withRemaining[key] = { status: p.status, remainingMs, thenScene: p.thenScene };
+        });
+        res.json(withRemaining);
+    });
+    app.post("/api/broadcast/phases/:key/arm", (req, res) => {
+        const key = req.params.key;
+        if (!phaseState[key])
+            return res.status(400).json({ error: "ukjent fase" });
+        const { minutes, thenScene } = req.body ?? {};
+        const mins = Number(minutes);
+        if (!mins || mins <= 0)
+            return res.status(400).json({ error: "minutes ma vaere et positivt tall" });
+        if (thenScene !== undefined)
+            phaseState[key].thenScene = String(thenScene);
+        const ms = Math.round(mins * 60 * 1000);
+        phaseState[key].status = "running";
+        phaseState[key].endsAt = Date.now() + ms;
+        phaseState[key].remainingMs = ms;
+        schedulePhaseTimer(key, ms);
+        res.json({ ok: true });
+    });
+    app.post("/api/broadcast/phases/:key/pause", (req, res) => {
+        const key = req.params.key;
+        if (!phaseState[key])
+            return res.status(400).json({ error: "ukjent fase" });
+        if (phaseState[key].status === "running" && phaseState[key].endsAt) {
+            phaseState[key].remainingMs = Math.max(0, phaseState[key].endsAt - Date.now());
+        }
+        phaseState[key].status = "paused";
+        phaseState[key].endsAt = null;
+        clearPhaseTimer(key);
+        res.json({ ok: true });
+    });
+    app.post("/api/broadcast/phases/:key/resume", (req, res) => {
+        const key = req.params.key;
+        if (!phaseState[key])
+            return res.status(400).json({ error: "ukjent fase" });
+        const ms = phaseState[key].remainingMs;
+        if (!ms)
+            return res.status(400).json({ error: "ingen nedtelling a fortsette" });
+        phaseState[key].status = "running";
+        phaseState[key].endsAt = Date.now() + ms;
+        schedulePhaseTimer(key, ms);
+        res.json({ ok: true });
+    });
+    app.post("/api/broadcast/phases/:key/force", async (req, res) => {
+        const key = req.params.key;
+        if (!phaseState[key])
+            return res.status(400).json({ error: "ukjent fase" });
+        clearPhaseTimer(key);
+        await runPhaseAction(key);
+        res.json({ ok: true });
+    });
+    app.post("/api/broadcast/phases/:key/cancel", (req, res) => {
+        const key = req.params.key;
+        if (!phaseState[key])
+            return res.status(400).json({ error: "ukjent fase" });
+        clearPhaseTimer(key);
+        phaseState[key].status = "idle";
+        phaseState[key].endsAt = null;
+        phaseState[key].remainingMs = 0;
+        res.json({ ok: true });
+    });
+    // OBS-scenebytte finnes fra for) - dette lagrer et ekte valg
+    // ("main"/"handheld") som Observer-dashbordet og overlayene kan lese,
+    // men bytter IKKE noe fysisk kamera-utstyr eller OBS-kilde selv. Gi
+    // beskjed hvis "Main Camera"-knappen faktisk skal bytte en bestemt
+    // OBS-kilde/scene-item - da kan dette utvides til a kalle OBS.
+    app.post("/api/broadcast/camera", (req, res) => {
+        const { camera } = req.body ?? {};
+        if (!camera)
+            return res.status(400).json({ error: "camera er pakrevd" });
+        (0, db_1.setSetting)("active_camera", String(camera));
+        pushBroadcastUpdate();
+        res.json({ ok: true });
+    });
+    app.post("/api/broadcast/name-tags", (req, res) => {
+        const { show } = req.body ?? {};
+        (0, db_1.setSetting)("show_name_tags", show ? "on" : "off");
+        pushBroadcastUpdate();
+        res.json({ ok: true });
+    });
+    // Egen synlighets-bryter for kort-showcase, uavhengig av HVILKET kort
+    // som er valgt (player1CardShowcase/player2CardShowcase i matches-
+    // tabellen) - slik at "Hide" i Graphics Control skjuler kortet uten
+    // a slette selve kortvalget, og "Show" kan vise det samme kortet
+    // igjen etterpa i stedet for at valget er tapt for godt.
+    app.post("/api/broadcast/card-showcase-visibility", (req, res) => {
+        const { show } = req.body ?? {};
+        (0, db_1.setSetting)("card_showcase_visible", show ? "on" : "off");
+        pushBroadcastUpdate();
+        res.json({ ok: true });
+    });
+    // Avslutter aktiv kamp pa gitt bord (bo3/bo5) uten a matte vinne et
+    // siste spill forst - for tilfeller som scoop/DQ/teknisk avgjorelse.
+    // Setter status til 'finished' pa selve kampen, men lar den fortsatt
+    // sta koblet til broadcast_state (overlayet kan da fortsatt vise
+    // sluttresultatet inntil neste kamp settes).
+    app.post("/api/broadcast/end-match", (req, res) => {
+        const { board } = req.body ?? {};
+        const column = board === "bo5" ? "bo5_match_id" : "bo3_match_id";
+        const state = db_1.db.prepare(`SELECT ${column} as matchId FROM broadcast_state WHERE id = 1`).get();
+        if (!state?.matchId)
+            return res.status(400).json({ error: "ingen aktiv kamp pa dette bordet" });
+        db_1.db.prepare(`UPDATE matches SET status = 'finished' WHERE id = ?`).run(state.matchId);
+        pushBroadcastUpdate();
+        res.json({ ok: true });
+    });
+    // Stopper streamen umiddelbart - dette er na "End Match"-knappens
+    // faktiske jobb i Observer-dashbordet (et hardt kutt), IKKE lenger
+    // knyttet til a markere en kamp som ferdig. Den gamle "marker kamp
+    // ferdig"-oppforselen finnes fortsatt over (/api/broadcast/end-match)
+    // for evt. bruk andre steder (f.eks. Kampkontroll-fanen).
+    app.post("/api/broadcast/stop-stream", async (_req, res) => {
+        if (intermissionTimer) {
+            clearTimeout(intermissionTimer);
+            intermissionTimer = null;
+            intermissionEndsAt = null;
+        }
+        const result = await (0, obs_1.stopObsStream)();
+        res.json(result);
+    });
+    // Starter en nedtelling (lengde satt av brukeren hver gang, i
+    // minutter) som stopper streamen automatisk nar den nar null - for
+    // planlagte pauser. Bytter ogsa til intermission-scenen med en gang
+    // (kan justeres senere om det ikke er onsket oppforsel).
+    app.post("/api/broadcast/arm-intermission", async (req, res) => {
+        const { minutes, switchScene } = req.body ?? {};
+        const mins = Number(minutes);
+        if (!mins || mins <= 0)
+            return res.status(400).json({ error: "minutes ma vaere et positivt tall" });
+        if (intermissionTimer)
+            clearTimeout(intermissionTimer);
+        const ms = Math.round(mins * 60 * 1000);
+        intermissionEndsAt = Date.now() + ms;
+        if (switchScene !== false) {
+            db_1.db.prepare(`UPDATE broadcast_state SET active_scene = 'intermission', updated_at = datetime('now') WHERE id = 1`).run();
+            pushBroadcastUpdate();
+            await (0, obs_1.setObsScene)("intermission");
+        }
+        intermissionTimer = setTimeout(async () => {
+            intermissionTimer = null;
+            intermissionEndsAt = null;
+            await (0, obs_1.stopObsStream)();
+        }, ms);
+        res.json({ ok: true, endsAt: intermissionEndsAt });
+    });
+    app.post("/api/broadcast/cancel-intermission", (_req, res) => {
+        if (intermissionTimer) {
+            clearTimeout(intermissionTimer);
+            intermissionTimer = null;
+        }
+        intermissionEndsAt = null;
+        res.json({ ok: true });
     });
     // ---- Meta-keycards (nokkelkort per arketype, satt manuelt) ----
     app.get("/api/meta-keycards", (_req, res) => {
@@ -912,6 +1804,7 @@ function startServer() {
     });
     server.listen(PORT, () => {
         console.log(`[server] Lokal API + WebSocket kjorer pa http://localhost:${PORT}`);
+        (0, db_1.appLog)("info", `Server startet pa port ${PORT}.`);
     });
     // Starter automatisk Melee-sync (hvert 30. sekund, se server/melee.ts)
     // - pusher oppdatert state til OBS/mobil hver gang en sync faktisk

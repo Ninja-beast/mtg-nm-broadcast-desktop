@@ -13,105 +13,31 @@
 
   const WIN_THRESHOLD = 2; // best-of-3: 2 game-wins tar matchen
 
-  // ---- Klokke (samme prinsipp som handleTimer i bo5-scene.js) ----
-  let timerSeconds = 0;
-  let pausedSeconds = -1;
-  let timerInterval = null;
-  let currentTimerState = "pause";
+  // Klokke og Scryfall-oppslag: se shared-utils.js/scryfall.js (delt
+  // med bo5-scene.js/meta-scene.js - var tidligere tre naesten
+  // identiske kopier av begge deler).
+  const bo3Timer = window.createTimerController("timerDisplay");
 
-  function formatSecondsAsClock(totalSecondsRaw) {
-    const totalSeconds = Math.max(0, Math.floor(Number(totalSecondsRaw) || 0));
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return (minutes < 10 ? "0" + minutes : String(minutes)) + ":" + (seconds < 10 ? "0" + seconds : String(seconds));
-  }
-
-  function handleTimer(seconds, status) {
-    const display = document.getElementById("timerDisplay");
-    if (!display) return;
-
-    status = (status || "pause").toLowerCase().trim();
-    if (status === currentTimerState && status !== "reset") return;
-
-    const previousTimerState = currentTimerState;
-    currentTimerState = status;
-
-    if (status === "start") {
-      timerSeconds = previousTimerState === "pause" && pausedSeconds >= 0 ? pausedSeconds : Number(seconds) || 0;
-      pausedSeconds = -1;
-
-      if (timerInterval) clearInterval(timerInterval);
-      timerInterval = setInterval(() => {
-        if (timerSeconds <= 0) {
-          clearInterval(timerInterval);
-          timerInterval = null;
-          display.innerText = "00:00";
-          return;
-        }
-        timerSeconds -= 1;
-        display.innerText = formatSecondsAsClock(timerSeconds);
-      }, 1000);
-    }
-
-    if (status === "pause") {
-      pausedSeconds = timerSeconds;
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-      }
-    }
-
-    if (status === "reset") {
-      pausedSeconds = -1;
-      timerSeconds = Number(seconds) || 0;
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-      }
-      display.innerText = formatSecondsAsClock(timerSeconds);
-    }
-  }
-
-  // ---- Card showcase (Scryfall, klient-side - se bo5-scene.js for samme prinsipp) ----
-  const cardShowcaseCache = new Map();
-
-  function fetchCardShowcaseImage(cardName) {
-    const key = String(cardName || "").trim().toLowerCase();
-    if (!key) return Promise.resolve(null);
-
-    if (cardShowcaseCache.has(key)) return cardShowcaseCache.get(key);
-
-    const promise = (async () => {
-      try {
-        const res = await fetch("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(key));
-        if (!res.ok) return null;
-        const card = await res.json();
-        return card?.image_uris?.normal || card?.card_faces?.[0]?.image_uris?.normal || null;
-      } catch (err) {
-        console.error("[OVERLAY] Scryfall-oppslag feilet for", cardName, err);
-        return null;
-      }
-    })();
-
-    cardShowcaseCache.set(key, promise);
-    return promise;
-  }
-
-  function setCardShowcase(el, cardName) {
+  function setCardShowcase(el, cardName, visible) {
     if (!el) return;
     const name = String(cardName || "").trim();
 
-    if (!name) {
+    if (!name || visible === false) {
       el.style.display = "none";
-      el.removeAttribute("src");
-      el.dataset.cardName = "";
+      if (!name) {
+        el.removeAttribute("src");
+        el.dataset.cardName = "";
+      }
       return;
     }
 
-    if (el.dataset.cardName === name && el.getAttribute("src")) return;
+    if (el.dataset.cardName === name && el.getAttribute("src")) {
+      el.style.display = "block";
+      return;
+    }
     el.dataset.cardName = name;
 
-    fetchCardShowcaseImage(name).then((url) => {
+    window.scryfallLookup.fetchImage(name).then((url) => {
       if (el.dataset.cardName !== name) return;
       if (url) {
         el.src = url;
@@ -142,20 +68,17 @@
     socket.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === "state") render(msg.data);
+        if (msg.type === "state") {
+          console.log("[DEBUG-WS]", new Date().toLocaleTimeString(), "showNameTags =", msg.data?.showNameTags);
+          render(msg.data);
+        }
       } catch (err) {
         console.error("[OVERLAY] Klarte ikke tolke melding fra server", err);
       }
     };
   }
 
-  function animateLifeChange(el) {
-    if (!el) return;
-    el.classList.remove("change");
-    void el.offsetWidth;
-    el.classList.add("change");
-    setTimeout(() => el.classList.remove("change"), 420);
-  }
+
 
   function buildRecord(player) {
     const wins = player?.wins ?? 0;
@@ -218,13 +141,13 @@
     const life2 = p2.life;
 
     if (elP1Life && life1 != null) {
-      if (prevLife1 !== null && prevLife1 !== life1) animateLifeChange(elP1Life);
+      if (prevLife1 !== null && prevLife1 !== life1) window.animateLifeChange(elP1Life);
       elP1Life.innerText = life1;
       prevLife1 = life1;
     }
 
     if (elP2Life && life2 != null) {
-      if (prevLife2 !== null && prevLife2 !== life2) animateLifeChange(elP2Life);
+      if (prevLife2 !== null && prevLife2 !== life2) window.animateLifeChange(elP2Life);
       elP2Life.innerText = life2;
       prevLife2 = life2;
     }
@@ -243,18 +166,34 @@
     if (elP1Record) elP1Record.innerText = buildRecord(p1);
     if (elP2Record) elP2Record.innerText = buildRecord(p2);
 
-    // Flagg: Melee-syncen (Fase 3) henter ikke nasjonalitet enna, sa
-    // p1.flag/p2.flag er alltid tomme na. VIKTIG: bruker visibility
-    // (ikke display:none) nar flagget mangler - siden flagg-elementet
-    // er FORSTE grid-item i navnekolonnen for spiller1, ville
-    // display:none fjernet det helt fra CSS grid-layouten og dyttet
-    // resten av kolonneplasseringen feil (deck/record endte pa SAMME
-    // rad som navnet i stedet for a stables under - kun spiller1
-    // rammes, siden flagget star SIST i DOM-rekkefolgen for spiller2).
+    // Player Name Tags-bryteren (Graphics Control) - satt DIREKTE pa
+    // hvert enkelt element (ikke bare foreldre-elementet .name-column),
+    // siden .name i style.css har sin egen eksplisitte
+    // "visibility:visible"-regel som ellers overstyrer arven fra
+    // foreldren og gjorde at navnet ble staende synlig uansett.
+    const nameTagsVisible = state.showNameTags !== false;
+    [elP1Name, elP2Name, elP1Deck, elP2Deck, elP1Record, elP2Record].forEach((el) => {
+      if (el) el.style.visibility = nameTagsVisible ? "visible" : "hidden";
+    });
+
+    // Flagg: normaliseres na med samme funksjon som BO5 (window.
+    // normalizeFlagCode, i shared-utils.js) - fikser en reell bug der
+    // BO3 tidligere brukte p1.flag/p2.flag ra som filnavn uten noen
+    // normalisering (f.eks. "Norway" ville aldri matchet
+    // images/flags/no.png). VIKTIG: bruker visibility (ikke
+    // display:none) nar flagget mangler - siden flagg-elementet er
+    // FORSTE grid-item i navnekolonnen for spiller1, ville display:none
+    // fjernet det helt fra CSS grid-layouten og dyttet resten av
+    // kolonneplasseringen feil (deck/record endte pa SAMME rad som
+    // navnet i stedet for a stables under - kun spiller1 rammes, siden
+    // flagget star SIST i DOM-rekkefolgen for spiller2).
+    const p1FlagCode = window.normalizeFlagCode(p1.flag);
+    const p2FlagCode = window.normalizeFlagCode(p2.flag);
+
     if (elP1Flag) {
       elP1Flag.style.display = "inline-block";
-      if (p1.flag) {
-        elP1Flag.src = "images/flags/" + p1.flag + ".png";
+      if (p1FlagCode) {
+        elP1Flag.src = "images/flags/" + p1FlagCode + ".png";
         elP1Flag.style.visibility = "visible";
       } else {
         elP1Flag.style.visibility = "hidden";
@@ -262,8 +201,8 @@
     }
     if (elP2Flag) {
       elP2Flag.style.display = "inline-block";
-      if (p2.flag) {
-        elP2Flag.src = "images/flags/" + p2.flag + ".png";
+      if (p2FlagCode) {
+        elP2Flag.src = "images/flags/" + p2FlagCode + ".png";
         elP2Flag.style.visibility = "visible";
       } else {
         elP2Flag.style.visibility = "hidden";
@@ -273,8 +212,8 @@
     // Card showcase: kortnavn settes manuelt fra Kampkontroll-fanen
     // (samme prinsipp som B11/B12 i det gamle regnearket) - hentes og
     // caches klient-side rett fra Scryfall (ingen kvote-bekymring).
-    setCardShowcase(elP1CardShowcase, p1.cardShowcase);
-    setCardShowcase(elP2CardShowcase, p2.cardShowcase);
+    setCardShowcase(elP1CardShowcase, p1.cardShowcase, state.cardShowcaseVisible !== false);
+    setCardShowcase(elP2CardShowcase, p2.cardShowcase, state.cardShowcaseVisible !== false);
 
     updateScoreSegments("p1score", p1.gameWins, p2.gameWins);
     updateScoreSegments("p2score", p2.gameWins, p1.gameWins);
@@ -291,7 +230,7 @@
     }
 
     const timer = state?.bo3Timer;
-    if (timer) handleTimer(timer.seconds, timer.status);
+    if (timer) bo3Timer.handleTimer(timer.seconds, timer.status);
 
     // Fase 6: spiller av vinner-animasjonen KUN nar event_id faktisk
     // har endret seg siden forrige gang - se lastSeenEventId over.

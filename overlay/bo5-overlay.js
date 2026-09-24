@@ -22,15 +22,13 @@ function log(...msg){
  * pa bo5-scene.js (som skal se noyaktig ut som originalen), oversetter
  * vi HER, pa samme mate som bo5-overlay.js sin doGet-mapping tidligere
  * gjorde mot regnearket.
+ *
+ * gameInfo.timer sendes na som RAA SEKUNDER (ikke lenger forhandsformatert
+ * til "MM:SS" her) - den delte klokke-kontrolleren i shared-utils.js
+ * godtar begge deler, sa denne filen trengte ikke sin egen (tredje!)
+ * kopi av formatSecondsAsClock lenger.
  */
-function formatSecondsAsClock(totalSecondsRaw){
-  const totalSeconds = Math.max(0, Math.floor(Number(totalSecondsRaw) || 0))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return (minutes < 10 ? "0" + minutes : String(minutes)) + ":" + (seconds < 10 ? "0" + seconds : String(seconds))
-}
-
-function mapToLegacyShape(bo5, timer){
+function mapToLegacyShape(bo5, timer, cardShowcaseVisible, showNameTags){
   if(!bo5) return defaultBo5Data_()
 
   // Draft-format: deck-navnet (arketype) gir ingen mening i draft -
@@ -62,9 +60,11 @@ function mapToLegacyShape(bo5, timer){
       // f.eks. "Runde 5" eller "Kvartfinale"), ikke lenger bordnummer.
       playoffFormat: bo5.round != null && bo5.round !== "" ? String(bo5.round).toUpperCase() : "",
       swissRound: "",
-      timer: formatSecondsAsClock(timer?.seconds ?? 3000),
+      timer: timer?.seconds ?? 3000,
       timerStatus: timer?.status ?? "pause"
     },
+    cardShowcaseVisible: cardShowcaseVisible !== false,
+    showNameTags: showNameTags !== false,
     event: { id: "", type: "", player: "" }
   }
 }
@@ -73,7 +73,7 @@ function defaultBo5Data_(){
   return {
     player1: { name: "PLAYER 1", life: 20, points: 0, scoreWins: 0, scoreLosses: 0, scoreDraw: 0, deck: "", cardShowcase: "", uid: "", flag: "" },
     player2: { name: "PLAYER 2", life: 20, points: 0, scoreWins: 0, scoreLosses: 0, scoreDraw: 0, deck: "", cardShowcase: "", uid: "", flag: "" },
-    gameInfo: { format: "", playoffFormat: "", swissRound: "", timer: "", timerStatus: "" },
+    gameInfo: { format: "", playoffFormat: "", swissRound: "", timer: 0, timerStatus: "" },
     event: { id: "", type: "", player: "" }
   }
 }
@@ -99,7 +99,7 @@ function connect(){
       // forrige visning sta urort i stedet for a blanke alt til tomt.
       if(!msg.data?.bo5) return
 
-      const data = mapToLegacyShape(msg.data.bo5, msg.data.bo5Timer)
+      const data = mapToLegacyShape(msg.data.bo5, msg.data.bo5Timer, msg.data.cardShowcaseVisible, msg.data.showNameTags)
       window.currentBo5Data = data
 
       if(window.overlayScenes?.bo5){

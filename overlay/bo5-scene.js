@@ -7,49 +7,16 @@ window.overlayScenes.bo5 = (function(){
 	let prevLife1 = null
 	let prevLife2 = null
 
-	let timerSeconds = 0
-	let pausedSeconds = -1
-	let timerInterval = null
-	let currentTimerState = "pause"
 	let gameInfoPositionFrame = null
 	const WIN_THRESHOLD = 3
 
+	// Klokke, flagg-normalisering og liv-animasjon: se shared-utils.js
+	// (delt med script.js/BO3 - var tidligere naesten identiske kopier
+	// begge steder).
+	const bo5Timer = window.createTimerController("bo5TimerDisplay")
+
 	function firstFilled(...values){
 		return values.find((val)=> val != null && String(val).trim() !== "")
-	}
-
-	function normalizeFlagCode(value){
-
-		if(value == null) return ""
-
-		const aliases = {
-			norge: "no",
-			norway: "no",
-			sverige: "se",
-			sweden: "se",
-			danmark: "dk",
-			denmark: "dk",
-			finland: "fi",
-			england: "gb-eng",
-			scotland: "gb-sct",
-			wales: "gb-wls",
-			northernireland: "gb-nir",
-			uk: "gb",
-			unitedkingdom: "gb",
-			usa: "us",
-			unitedstates: "us"
-		}
-
-		const cleaned = String(value)
-			.trim()
-			.toLowerCase()
-			.replace(/_/g,"-")
-			.replace(/\s+/g,"")
-			.replace(/[^a-z0-9-]/g,"")
-
-		if(!cleaned) return ""
-
-		return aliases[cleaned] || cleaned
 	}
 
 	function buildRecord(player){
@@ -75,18 +42,6 @@ window.overlayScenes.bo5 = (function(){
 		return `${wins}-${losses}-${draws}`
 	}
 
-	function animateLife(el){
-
-		if(!el) return
-
-		el.classList.remove("change")
-		void el.offsetWidth
-		el.classList.add("change")
-
-		setTimeout(()=>{
-			el.classList.remove("change")
-		},420)
-	}
 
 	function fitPlayerName(el, nameText){
 
@@ -167,58 +122,32 @@ window.overlayScenes.bo5 = (function(){
 	}
 
 	/* =============================
-	   CARD SHOWCASE (Scryfall lookup)
+	   CARD SHOWCASE (Scryfall lookup - se scryfall.js)
 	============================= */
 
-	const cardShowcaseCache = new Map()
-
-	function fetchCardShowcaseImage(cardName){
-
-		const key = String(cardName || "").trim().toLowerCase()
-		if(!key) return Promise.resolve(null)
-
-		if(cardShowcaseCache.has(key)){
-			return cardShowcaseCache.get(key)
-		}
-
-		const promise = (async () => {
-			try {
-				const res = await fetch("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(key))
-				if(!res.ok) return null
-				const card = await res.json()
-				return card?.image_uris?.normal
-					|| card?.card_faces?.[0]?.image_uris?.normal
-					|| null
-			} catch (err) {
-				console.error("[BO5 OVERLAY] scryfall lookup failed for", cardName, err)
-				return null
-			}
-		})()
-
-		cardShowcaseCache.set(key, promise)
-		return promise
-	}
-
-	function setCardShowcase(el, cardName){
+	function setCardShowcase(el, cardName, visible){
 
 		if(!el) return
 
 		const name = String(cardName || "").trim()
 
-		if(!name){
+		if(!name || visible === false){
 			el.style.display = "none"
-			el.removeAttribute("src")
-			el.dataset.cardName = ""
+			if(!name){
+				el.removeAttribute("src")
+				el.dataset.cardName = ""
+			}
 			return
 		}
 
 		if(el.dataset.cardName === name && el.getAttribute("src")){
+			el.style.display = "block"
 			return
 		}
 
 		el.dataset.cardName = name
 
-		fetchCardShowcaseImage(name).then((url)=>{
+		window.scryfallLookup.fetchImage(name).then((url)=>{
 			if(el.dataset.cardName !== name) return
 
 			if(url){
@@ -270,66 +199,6 @@ window.overlayScenes.bo5 = (function(){
 		})
 	}
 
-	function handleTimer(timeStr, status){
-
-		if(!timeStr) return
-
-		const display = document.getElementById('bo5TimerDisplay')
-		if(!display) return
-
-		status = (status || '').toLowerCase().trim()
-
-		if(status === currentTimerState && status !== 'reset') return
-
-		const previousTimerState = currentTimerState
-		currentTimerState = status
-
-		if(status === 'start'){
-			if(previousTimerState === 'pause' && pausedSeconds >= 0){
-				timerSeconds = pausedSeconds
-			} else {
-				const parts = String(timeStr).split(':')
-				timerSeconds = parseInt(parts[0],10) * 60 + parseInt(parts[1],10)
-			}
-
-			pausedSeconds = -1
-
-			if(timerInterval) clearInterval(timerInterval)
-
-			timerInterval = setInterval(()=>{
-				if(timerSeconds <= 0){
-					clearInterval(timerInterval)
-					timerInterval = null
-					display.innerText = '00:00'
-					return
-				}
-
-				timerSeconds -= 1
-
-				const minutes = Math.floor(timerSeconds / 60)
-				const seconds = timerSeconds % 60
-				display.innerText = (minutes < 10 ? '0' + minutes : minutes) + ':' + (seconds < 10 ? '0' + seconds : seconds)
-			},1000)
-		}
-
-		if(status === 'pause'){
-			pausedSeconds = timerSeconds
-			if(timerInterval){
-				clearInterval(timerInterval)
-				timerInterval = null
-			}
-		}
-
-		if(status === 'reset'){
-			pausedSeconds = -1
-			timerSeconds = 0
-			if(timerInterval){
-				clearInterval(timerInterval)
-				timerInterval = null
-			}
-			display.innerText = timeStr
-		}
-	}
 
 	function render(data){
 		const p1 = data.player1 || {}
@@ -353,7 +222,7 @@ window.overlayScenes.bo5 = (function(){
 		const name1 = (p1.name ?? 'PLAYER').toUpperCase()
 		const name2 = (p2.name ?? 'PLAYER').toUpperCase()
 
-		const p1FlagCode = normalizeFlagCode(firstFilled(
+		const p1FlagCode = window.normalizeFlagCode(firstFilled(
 			p1.flagCode,
 			p1.flag,
 			p1.countryCode,
@@ -371,7 +240,7 @@ window.overlayScenes.bo5 = (function(){
 			data.B9
 		))
 
-		const p2FlagCode = normalizeFlagCode(firstFilled(
+		const p2FlagCode = window.normalizeFlagCode(firstFilled(
 			p2.flagCode,
 			p2.flag,
 			p2.countryCode,
@@ -440,8 +309,18 @@ window.overlayScenes.bo5 = (function(){
 		if(elP1Record) elP1Record.innerText = record1
 		if(elP2Record) elP2Record.innerText = record2
 
-		setCardShowcase(elP1CardShowcase, cardShowcase1)
-		setCardShowcase(elP2CardShowcase, cardShowcase2)
+		// Player Name Tags-bryteren (Graphics Control) - satt DIREKTE pa
+		// hvert enkelt element (ikke pa foreldre-elementet .name-column),
+		// siden .name i style.css har sin egen eksplisitte
+		// "visibility:visible"-regel som ellers overstyrer arven fra
+		// foreldren.
+		const nameTagsVisible = data.showNameTags !== false
+		;[elP1Name, elP2Name, elP1Deck, elP2Deck, elP1Record, elP2Record].forEach((el) => {
+			if(el) el.style.visibility = nameTagsVisible ? 'visible' : 'hidden'
+		})
+
+		setCardShowcase(elP1CardShowcase, cardShowcase1, data.cardShowcaseVisible !== false)
+		setCardShowcase(elP2CardShowcase, cardShowcase2, data.cardShowcaseVisible !== false)
 
 		scheduleGameInfoPosition()
 
@@ -465,7 +344,7 @@ window.overlayScenes.bo5 = (function(){
 		// knapper) - ingen ekstern lifecounter-tjeneste involvert lenger,
 		// sa den tidligere konflikten som gjorde at denne linjen matte
 		// skrus av, finnes ikke i denne oppsettet.
-		handleTimer(game.timer || '50:00', game.timerStatus || 'pause')
+		bo5Timer.handleTimer(game.timer ?? 3000, game.timerStatus || 'pause')
 	}
 
 	window.addEventListener('resize', scheduleGameInfoPosition)

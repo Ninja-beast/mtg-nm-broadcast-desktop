@@ -43,6 +43,13 @@ function readImageAsDataUri(filePath: string): string {
   return `data:image/${mimeType};base64,${buffer.toString("base64")}`;
 }
 
+// Trenger "denied"/"granted" a rapportere tilbake til UI-et om selve
+// SJEKKEN (fant/fant ikke en ny versjon), atskilt fra selve NEDLASTING-
+// status (som skjer i bakgrunnen via autoDownload=true, se under) - de
+// to var tidligere sammenblandet, noe som gjorde at UI-et ikke kunne
+// skille "ingen oppdatering funnet" fra "sjekker fortsatt".
+let updateCheckInFlight = false;
+
 function setupAutoUpdater() {
   // Auto-oppdatering fungerer kun i en pakket .exe (ikke i "npm run
   // dev"), siden den sjekker mot en ekte utgitt versjon pa GitHub
@@ -194,7 +201,7 @@ app.whenReady().then(() => {
     // vaere bakgrunn (siste valgte vinner, som for). Er det derimot
     // INGEN eksplisitt logo-fil og TO ELLER FLERE navnlose bilder
     // valgt samtidig, antas det vanligste bruksmonsteret: forste fil
-        // = bakgrunn, andre fil = logo (i stedet for at begge kjemper om
+    // = bakgrunn, andre fil = logo (i stedet for at begge kjemper om
     // samme bakgrunns-felt og den ene stille overskriver den andre -
     // noe som var arsaken til at verken bakgrunn.png eller file.png
     // ble satt riktig forrige gang).
@@ -216,6 +223,49 @@ app.whenReady().then(() => {
     }
 
     return picked;
+  });
+
+  // ---- Oppdateringer (GitHub Releases, via electron-updater) ----
+  // Manuell sjekk - trigges fra Settings-fanen sin "Check for updates"-
+  // knapp. Returnerer et rent JSON-svar UI-et kan vise direkte, i
+  // stedet for a la UI-et matte lytte pa autoUpdater sine interne
+  // events for a fa et konkret svar pa "er det en ny versjon?".
+  ipcMain.handle("check-for-updates", async () => {
+    if (!app.isPackaged) {
+      return { ok: false, message: "Kun tilgjengelig i en pakket .exe, ikke i npm run dev.", currentVersion: app.getVersion() };
+    }
+    if (updateCheckInFlight) {
+      return { ok: false, message: "En sjekk pagar allerede.", currentVersion: app.getVersion() };
+    }
+    updateCheckInFlight = true;
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      const latestVersion = result?.updateInfo?.version;
+      const updateAvailable = !!latestVersion && latestVersion !== app.getVersion();
+      return {
+        ok: true,
+        currentVersion: app.getVersion(),
+        latestVersion: latestVersion || app.getVersion(),
+        updateAvailable,
+        releaseNotes: typeof result?.updateInfo?.releaseNotes === "string" ? result.updateInfo.releaseNotes : ""
+      };
+    } catch (err: any) {
+      return { ok: false, message: err?.message || String(err), currentVersion: app.getVersion() };
+    } finally {
+      updateCheckInFlight = false;
+    }
+  });
+
+  // Installerer en oppdatering som allerede er ferdig nedlastet i
+  // bakgrunnen (autoDownload=true over) - lukker og restarter appen.
+  // Feiler tydelig (i stedet for a gjore ingenting) hvis ingenting er
+  // klart til installasjon enna.
+  ipcMain.handle("quit-and-install-update", () => {
+    if (!app.isPackaged) {
+      return { ok: false, message: "Kun tilgjengelig i en pakket .exe." };
+    }
+    autoUpdater.quitAndInstall();
+    return { ok: true };
   });
 
   app.on("activate", () => {

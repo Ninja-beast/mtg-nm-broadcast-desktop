@@ -43,6 +43,12 @@ function readImageAsDataUri(filePath) {
     const buffer = node_fs_1.default.readFileSync(filePath);
     return `data:image/${mimeType};base64,${buffer.toString("base64")}`;
 }
+// Trenger "denied"/"granted" a rapportere tilbake til UI-et om selve
+// SJEKKEN (fant/fant ikke en ny versjon), atskilt fra selve NEDLASTING-
+// status (som skjer i bakgrunnen via autoDownload=true, se under) - de
+// to var tidligere sammenblandet, noe som gjorde at UI-et ikke kunne
+// skille "ingen oppdatering funnet" fra "sjekker fortsatt".
+let updateCheckInFlight = false;
 function setupAutoUpdater() {
     // Auto-oppdatering fungerer kun i en pakket .exe (ikke i "npm run
     // dev"), siden den sjekker mot en ekte utgitt versjon pa GitHub
@@ -205,6 +211,49 @@ electron_1.app.whenReady().then(() => {
             }
         }
         return picked;
+    });
+    // ---- Oppdateringer (GitHub Releases, via electron-updater) ----
+    // Manuell sjekk - trigges fra Settings-fanen sin "Check for updates"-
+    // knapp. Returnerer et rent JSON-svar UI-et kan vise direkte, i
+    // stedet for a la UI-et matte lytte pa autoUpdater sine interne
+    // events for a fa et konkret svar pa "er det en ny versjon?".
+    electron_1.ipcMain.handle("check-for-updates", async () => {
+        if (!electron_1.app.isPackaged) {
+            return { ok: false, message: "Kun tilgjengelig i en pakket .exe, ikke i npm run dev.", currentVersion: electron_1.app.getVersion() };
+        }
+        if (updateCheckInFlight) {
+            return { ok: false, message: "En sjekk pagar allerede.", currentVersion: electron_1.app.getVersion() };
+        }
+        updateCheckInFlight = true;
+        try {
+            const result = await electron_updater_1.autoUpdater.checkForUpdates();
+            const latestVersion = result?.updateInfo?.version;
+            const updateAvailable = !!latestVersion && latestVersion !== electron_1.app.getVersion();
+            return {
+                ok: true,
+                currentVersion: electron_1.app.getVersion(),
+                latestVersion: latestVersion || electron_1.app.getVersion(),
+                updateAvailable,
+                releaseNotes: typeof result?.updateInfo?.releaseNotes === "string" ? result.updateInfo.releaseNotes : ""
+            };
+        }
+        catch (err) {
+            return { ok: false, message: err?.message || String(err), currentVersion: electron_1.app.getVersion() };
+        }
+        finally {
+            updateCheckInFlight = false;
+        }
+    });
+    // Installerer en oppdatering som allerede er ferdig nedlastet i
+    // bakgrunnen (autoDownload=true over) - lukker og restarter appen.
+    // Feiler tydelig (i stedet for a gjore ingenting) hvis ingenting er
+    // klart til installasjon enna.
+    electron_1.ipcMain.handle("quit-and-install-update", () => {
+        if (!electron_1.app.isPackaged) {
+            return { ok: false, message: "Kun tilgjengelig i en pakket .exe." };
+        }
+        electron_updater_1.autoUpdater.quitAndInstall();
+        return { ok: true };
     });
     electron_1.app.on("activate", () => {
         if (electron_1.BrowserWindow.getAllWindows().length === 0)

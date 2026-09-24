@@ -8,37 +8,7 @@ window.overlayScenes.meta = (function(){
   const MAX_ROWS_PER_COLUMN = 8
   const MAX_TOTAL_ROWS = MAX_ROWS_PER_COLUMN * 2
 
-  // ---- Scryfall lookup + caching ----
-  // Maps lowercased card name -> Promise<string|null> (image URL or null on failure)
-  const scryfallCache = new Map()
-
-  function fetchScryfallImage(cardName){
-    const key = String(cardName || "").trim().toLowerCase()
-    if(!key) return Promise.resolve(null)
-
-    if(scryfallCache.has(key)){
-      return scryfallCache.get(key)
-    }
-
-    const promise = (async () => {
-      try {
-        const res = await fetch("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(key))
-        if(!res.ok) return null
-        const card = await res.json()
-        const url = card?.image_uris?.normal
-          || card?.card_faces?.[0]?.image_uris?.normal
-          || null
-        return url
-      } catch (err) {
-        console.error("[META] scryfall lookup failed for", cardName, err)
-        return null
-      }
-    })()
-
-    scryfallCache.set(key, promise)
-    return promise
-  }
-
+  // Scryfall-oppslag: se scryfall.js (delt med script.js/bo5-scene.js).
   function createKeyCardCrop(cardName){
     const wrap = document.createElement("div")
     wrap.className = "meta-keycard-crop"
@@ -49,7 +19,7 @@ window.overlayScenes.meta = (function(){
 
     wrap.appendChild(img)
 
-    fetchScryfallImage(cardName).then((url)=>{
+    window.scryfallLookup.fetchImage(cardName).then((url)=>{
       if(url){
         img.src = url
       } else {

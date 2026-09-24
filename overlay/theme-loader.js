@@ -57,6 +57,13 @@
   }
   const CURRENT_SCENE = detectCurrentScene();
 
+  // Logoen skal vaere skjult som standard pa ALLE scener, uavhengig
+  // av hva som er huket av i Tema-panelet i appen (theme.hiddenLogoScenes
+  // fra serveren). Dette hindrer at et opplastet bilde i Tema-panelet
+  // vises dobbelt (bade som full bakgrunn OG som sentrert logo).
+  // Fjern en scene fra denne listen hvis logoen skal kunne vises der.
+  const ALWAYS_HIDE_LOGO_SCENES = ["bo3", "bo5", "casterdesk", "top16", "bracket", "meta", "starting"];
+
   function applyTheme(theme) {
     document.documentElement.style.setProperty(
       "--bg-image",
@@ -66,7 +73,10 @@
     setNmBrandingVisible((theme.name || "").trim().toLowerCase() === "nm");
 
     const hiddenScenes = Array.isArray(theme.hiddenLogoScenes) ? theme.hiddenLogoScenes : [];
-    const logoAllowedHere = theme.logoUrl && !hiddenScenes.includes(CURRENT_SCENE);
+    const logoAllowedHere =
+      theme.logoUrl &&
+      !hiddenScenes.includes(CURRENT_SCENE) &&
+      !ALWAYS_HIDE_LOGO_SCENES.includes(CURRENT_SCENE);
 
     let logoEl = document.getElementById("themeLogo");
     if (logoAllowedHere) {
